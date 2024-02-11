@@ -1,0 +1,404 @@
+---
+title: "Football Analytics"
+author: "Adam Gilbert"
+format: html
+theme: flatly
+date: today
+toc: true
+---
+
+## Introduction
+
+This notebook contains sections corresponding to the textbook *Football Analytics with Python & R*, by Eric A. Eager and Richard A. Erickson. I include a subsection in this notebook for each chapter of the text, and include solutions to exercises as well as some explorations of different questions I thought may be interesting to explore.
+
+## Chapter 1: Football Analytics
+
+This introductory chapter provides the reader an introduction to R and Python as well as to the `{nflfastR}` package in R (and the `nfl_data_py` Python module). I'll be working through the textbook in R, since that is my preferred language.
+
+```{r message = FALSE, warning = FALSE}
+library(tidyverse)
+library(kableExtra)
+library(nflfastR)
+```
+
+We can load *play-by-play* data using the `load_pbp()` function from this package. I'll load the data from the 2021 season, as shown in the textbook.
+
+```{r}
+pbp_21 <- load_pbp(2021)
+
+pbp_21 %>%
+  head(n = 2) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("hover", "striped"))
+```
+
+This collection of play-by-play data from the 2021 season includes `r pbp_21 %>% nrow()` observations on `r pbp_21 %>% ncol()` variables. The text guides us through a simple example of ranking quarterbacks by their level of *agressivity*, as defined by average pass depth (`air_yards`). In order to perform this analysis, we'll filter to include only pass plays with recorded `air_yards` values. After computing the summary statistics, we filter out unknown passers and passers who attempted very few passes.
+
+```{r}
+pbp_21 %>%
+  filter((play_type == "pass") & (!is.na(air_yards))) %>%
+  group_by(passer_id, passer) %>%
+  summarize(num_passes = n(), avg_depth_of_pass = mean(air_yards),
+            .groups = "drop") %>%
+  filter((num_passes >= 100) & (!is.na(passer))) %>%
+  arrange(-avg_depth_of_pass) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("hover", "striped"))
+```
+
+The below plots show pass depth distributons for each of the top fifteen quarterbacks listed above.
+
+```{r}
+deepest_passers <- pbp_21 %>%
+  filter((play_type == "pass") & (!is.na(air_yards))) %>%
+  group_by(passer_id, passer) %>%
+  summarize(num_passes = n(), avg_depth_of_pass = mean(air_yards),
+            .groups = "drop") %>%
+  filter((num_passes >= 100) & (!is.na(passer))) %>%
+  arrange(-avg_depth_of_pass) %>%
+  slice_max(avg_depth_of_pass, n = 15) %>%
+  pull(passer)
+
+pbp_21 %>%
+  filter((play_type == "pass") & (!is.na(air_yards)) & (passer %in% deepest_passers)) %>%
+  mutate(passer = factor(passer, levels = deepest_passers)) %>%
+  ggplot() + 
+  geom_density(aes(x = air_yards, fill = passer), show.legend = FALSE) + 
+  geom_boxplot(aes(x = air_yards, y = -0.02, fill = passer), width = 0.01, show.legend = FALSE) + 
+  facet_wrap(~passer, nrow = 3) + 
+  labs(title = "Pass Depth Distributions for 2021's Deepest Average Passers",
+       x = "Air Yards",
+       y = "")
+```
+
+It is interesting how similar these distributions look. Drew Lock had the highest average `air_depth` but he also had the fewest total passes among this group. This means that those very few deep-ball outliers had greater influence on his average pass depth than the other quarterbacks who played more snaps.
+
+## Chapter 2: EDA through Stable Versus Unstable QB Stats
+
+The authors include an interesting discussion on how players should be evaluated. Some statistical measures are relatively stable for players year-over-year, while others include more variability. This introduces the possibility for strategic trading on high-variability measures -- we can *sell-high* and *buy-low* on players based on such performance measures if other teams are placing undue weight on these high-variance and unstable stats. For example, yards gained by a running back are not generally stable and neither are yards gained as a result of deep throws from a quarterback. Yards gained by short passes, however, are generally stable year-over-year. Let's analyse some of these ideas. 
+
+In the text, the authors use EDA to explore the hypothesis: *Throwing deep passes is more valuable than short passes, but it is difficult to say whether a quarterback is "good" at deep passes*. Here, the variability comes in with the latter half of the hypothesis -- determining whether a quarterback excels in deep passing is difficult because of the high variability in deep passing statistics year-over-year.
+
+Since we are discussing year-over-year comparisons, we'll need to load several seasons-worth of data. We'll do that now.
+
+```{r}
+pbp_16_21 <- load_pbp(2016:2021)
+```
+
+We've got a lot more data to deal with now. Certainly, the number of features (variables) has stayed the same, but now we have `r pbp_16_21 %>% nrow()` observations across the six seasons. The authors justify looking at 2016 to 2021 because the beginning of the 2016 season was the last time a major rule change was implemented. A touchback on a kickoff resulted in starting from the 25 yard line rather than the 20 yard line. This rule change resulted in a change in kickoff strategy across the league, so analysing pre- and post-2016 data separately is justifiable.
+
+Let's take a look at year-over-year short and long pass results. We'll use the `air_yards` variable to separate pass attempts into *long* (at least 20 yards) and *short* (less than 20 yards), and start with some simple numeric summaries, looking at *expected points added` (`epa`) by long/short pass plays.
+
+```{r}
+pbp_16_21 %>%
+  filter(play_type == "pass",
+         !(is.na(air_yards))) %>%
+  mutate(passing_yards = ifelse(is.na(passing_yards), 0, passing_yards),
+         pass_type = ifelse(air_yards >= 20, "long", "short")) %>%
+  mutate(pass_type = factor(pass_type, levels = c("short", "long"))) %>%
+  group_by(pass_type) %>%
+  summarize(
+    min_epa = min(epa, na.rm = TRUE),
+    q1_epa = quantile(epa, 0.25, na.rm = TRUE),
+    med_epa = median(epa, na.rm = TRUE),
+    mean_epa = mean(epa, na.rm = TRUE),
+    q3_epa = quantile(epa, 0.75, na.rm = TRUE),
+    max_epa = max(epa, na.rm = TRUE),
+    iqr_epa = IQR(epa, na.rm = TRUE),
+    sd_epa = sd(epa, na.rm = TRUE),
+    missing_count = sum(is.na(epa)),
+    .groups = "drop"
+  ) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("hover", "striped"))
+```
+
+We can see that expected points added has greater variation on long pass plays than it does on short pass plays.
+
+We'll build a plot to compare passing stats between pairs of consecutive years, investigating stability of `passing_yards`. Let's start by simply drawing the distributions of passing yards resulting from long and short pass plays.
+
+```{r}
+pbp_16_21 %>%
+  filter(play_type == "pass", !(is.na(air_yards))) %>%
+  mutate(pass_type = ifelse(air_yards > 20, "long", "short"),
+         passing_yards = ifelse(is.na(passing_yards), 0, passing_yards)) %>%
+  mutate(pass_type = factor(pass_type, levels = c("short", "long"))) %>%
+  ggplot() + 
+  geom_histogram(aes(x = passing_yards, y = ..density.., fill = pass_type), 
+                 binwidth = 1, color = "black", show.legend = FALSE) +
+  #geom_density(aes(x = passing_yards, fill = pass_type),
+  #             alpha = 0.4, show.legend = FALSE) + 
+  geom_boxplot(aes(x = passing_yards, y = -0.02, fill = pass_type), 
+               width = 0.01, show.legend = FALSE) + 
+  labs(
+    title = "Distribution of Passing Yards by Pass Type",
+    x = "Passing Yards",
+    y = ""
+  ) + 
+  facet_wrap(~pass_type)
+```
+
+We can see that lots of pass plays in general do not result in catches. Long passes, however, are much less likely to result in a completion. Interestingly, the distribution of passing yards on short passes, looks to be normally distributed when dropped balls are omitted.
+
+Now that we have these insights, let's take a look at the distributions of expected points added on these plays as well.
+
+```{r}
+pbp_16_21 %>%
+  filter(play_type == "pass", !(is.na(air_yards))) %>%
+  mutate(pass_type = ifelse(air_yards > 20, "long", "short"),
+         passing_yards = ifelse(is.na(passing_yards), 0, passing_yards)) %>%
+  mutate(pass_type = factor(pass_type, levels = c("short", "long"))) %>%
+  ggplot() + 
+  geom_histogram(aes(x = epa, y = ..density.., fill = pass_type), 
+                 bins = 50, color = "black", show.legend = FALSE) +
+  geom_density(aes(x = epa, fill = pass_type),
+               alpha = 0.4, show.legend = FALSE) + 
+  geom_boxplot(aes(x = epa, y = -0.02, fill = pass_type), 
+               width = 0.01, show.legend = FALSE) + 
+  labs(
+    title = "Distribution of Expected Points Added by Pass Type",
+    x = "Passing Yards",
+    y = ""
+  ) + 
+  facet_wrap(~pass_type)
+```
+
+From the plots above, we again see that the long passes show greater variability in terms of expected points added. On average, the `epa` values here are lower than for short passes, however we do see that when long passes result in receptions [assumedly], the `epa` values are much greater.
+
+Now let's see whether average passing yards on short- and long- passing attemps are stable metrics year over year. We'll remove passers that threw very few attempts in a season, since these often include non-QB players throwing passes on trick plays that may end up in very large gains.
+
+```{r}
+pbp_16_21 %>%
+  filter(play_type == "pass", !(is.na(air_yards))) %>%
+  mutate(pass_type = ifelse(air_yards > 20, "long", "short"),
+         passing_yards = ifelse(is.na(passing_yards), 0, passing_yards)) %>%
+  group_by(passer_id, passer, season, pass_type) %>%
+  summarize(passing_attempts = n(),
+            avg_pass_yards = mean(passing_yards),
+            .groups = "drop") %>%
+  filter(passing_attempts >= 10) %>%
+  mutate(next_season = season + 1) %>%
+  inner_join(
+    pbp_16_21 %>%
+      filter(play_type == "pass", !(is.na(air_yards))) %>%
+      mutate(pass_type = ifelse(air_yards > 20, "long", "short"),
+             passing_yards = ifelse(is.na(passing_yards), 0, passing_yards)) %>%
+      group_by(passer_id, passer, season, pass_type) %>%
+      summarize(passing_attempts = n(),
+                avg_pass_yards = mean(passing_yards),
+              .groups = "drop") %>%
+      filter(passing_attempts >= 10),
+      by = c("passer_id" = "passer_id", 
+           "passer" = "passer",
+           "next_season" = "season",
+           "pass_type" = "pass_type")
+  ) %>%
+  rename(avg_pass_yards_curr = avg_pass_yards.x,
+         avg_pass_yards_next = avg_pass_yards.y) %>%
+  mutate(pass_type = factor(pass_type, levels = c("short", "long"))) %>%
+  ggplot() + 
+  geom_point(aes(x = avg_pass_yards_curr, y = avg_pass_yards_next)) + 
+  geom_smooth(aes(x = avg_pass_yards_curr, y = avg_pass_yards_next),
+              method = "lm") + 
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed") + 
+  facet_wrap(~pass_type) + 
+  labs(
+    title = "Year-to-Year Stability of Passing Yards",
+    x = "Current Year Passing Yards",
+    y = "Next Year Passing Yards"
+  )
+```
+
+We can see that there is a positive correlation between year over year passing yards. That correlation looks to be stronger on short passes. Let's see this numerically below.
+
+```{r}
+pbp_16_21 %>%
+  filter(play_type == "pass", !(is.na(air_yards))) %>%
+  mutate(pass_type = ifelse(air_yards > 20, "long", "short"),
+         passing_yards = ifelse(is.na(passing_yards), 0, passing_yards)) %>%
+  group_by(passer_id, passer, season, pass_type) %>%
+  summarize(passing_attempts = n(),
+            avg_pass_yards = mean(passing_yards),
+            .groups = "drop") %>%
+  filter(passing_attempts >= 10) %>%
+  mutate(next_season = season + 1) %>%
+  inner_join(
+    pbp_16_21 %>%
+      filter(play_type == "pass", !(is.na(air_yards))) %>%
+      mutate(pass_type = ifelse(air_yards > 20, "long", "short"),
+             passing_yards = ifelse(is.na(passing_yards), 0, passing_yards)) %>%
+      group_by(passer_id, passer, season, pass_type) %>%
+      summarize(passing_attempts = n(),
+                avg_pass_yards = mean(passing_yards),
+              .groups = "drop") %>%
+      filter(passing_attempts >= 10),
+      by = c("passer_id" = "passer_id", 
+           "passer" = "passer",
+           "next_season" = "season",
+           "pass_type" = "pass_type")
+  ) %>%
+  rename(avg_pass_yards_curr = avg_pass_yards.x,
+         avg_pass_yards_next = avg_pass_yards.y) %>%
+  mutate(pass_type = factor(pass_type, levels = c("short", "long"))) %>%
+  group_by(pass_type) %>%
+  summarize(y2y_avg_pass_yards_correlation = cor(avg_pass_yards_curr, avg_pass_yards_next)) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("hover", "striped"))
+```
+
+### Homework Exercises
+
+The following are the exercises at the end of this chapter.
+
+1. Create histograms using `epa` (Expected Points Added) per pass attempt.
+
+> I ended up doing this earlier in the *notes* section.
+
+2. Create boxplots using `epa` per pass attempt.
+
+> I also ended up doing this earlier in the *notes* section.
+
+3. Perform the stability analysis for average `epa` per pass attempt. Interpret the results. Do any players have similar yards per attempt year over year, but quite different EPA values? Where could this come from?
+
+> In the plot below, I'll compare average EPA values for consecutive years. I'll add player names to the plot in any cases where the average EPA for consecutive years differed by a full point or more.
+
+```{r}
+pbp_16_21 %>%
+  filter(play_type == "pass", !(is.na(air_yards))) %>%
+  mutate(pass_type = ifelse(air_yards > 20, "long", "short")) %>%
+  group_by(passer_id, passer, season, pass_type) %>%
+  summarize(passing_attempts = n(),
+            avg_epa = mean(epa, na.rm = TRUE),
+            .groups = "drop") %>%
+  filter(passing_attempts >= 10) %>%
+  mutate(next_season = season + 1) %>%
+  inner_join(
+    pbp_16_21 %>%
+      filter(play_type == "pass", !(is.na(air_yards))) %>%
+      mutate(pass_type = ifelse(air_yards > 20, "long", "short")) %>%
+      group_by(passer_id, passer, season, pass_type) %>%
+      summarize(passing_attempts = n(),
+                avg_epa = mean(epa, na.rm = TRUE),
+              .groups = "drop") %>%
+      filter(passing_attempts >= 10),
+      by = c("passer_id" = "passer_id", 
+           "passer" = "passer",
+           "next_season" = "season",
+           "pass_type" = "pass_type")
+  ) %>%
+  rename(avg_epa_curr = avg_epa.x,
+         avg_epa_next = avg_epa.y) %>%
+  mutate(pass_type = factor(pass_type, levels = c("short", "long"))) %>%
+  ggplot() + 
+  geom_point(aes(x = avg_epa_curr, y = avg_epa_next)) + 
+  geom_smooth(aes(x = avg_epa_curr, y = avg_epa_next),
+              method = "lm") + 
+  geom_text(aes(x = avg_epa_curr, y = avg_epa_next, label = ifelse(abs(avg_epa_curr - avg_epa_next) > 1, passer, ""))) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed") + 
+  facet_wrap(~pass_type) + 
+  labs(
+    title = "Year-to-Year Stability of Expected Points Added",
+    x = "Current Year Average EPA",
+    y = "Next Year Average EPA"
+  )
+```
+
+> Similar to what we did with the year-over-year passing yards, we'll compute the correlation between consecutive year average EPA per pass attempt for long and short passes.
+
+```{r}
+pbp_16_21 %>%
+  filter(play_type == "pass", !(is.na(air_yards))) %>%
+  mutate(pass_type = ifelse(air_yards > 20, "long", "short")) %>%
+  group_by(passer_id, passer, season, pass_type) %>%
+  summarize(passing_attempts = n(),
+            avg_epa = mean(epa, na.rm = TRUE),
+            .groups = "drop") %>%
+  filter(passing_attempts >= 10) %>%
+  mutate(next_season = season + 1) %>%
+  inner_join(
+    pbp_16_21 %>%
+      filter(play_type == "pass", !(is.na(air_yards))) %>%
+      mutate(pass_type = ifelse(air_yards > 20, "long", "short")) %>%
+      group_by(passer_id, passer, season, pass_type) %>%
+      summarize(passing_attempts = n(),
+                avg_epa = mean(epa, na.rm = TRUE),
+              .groups = "drop") %>%
+      filter(passing_attempts >= 10),
+      by = c("passer_id" = "passer_id", 
+           "passer" = "passer",
+           "next_season" = "season",
+           "pass_type" = "pass_type")
+  ) %>%
+  rename(avg_epa_curr = avg_epa.x,
+         avg_epa_next = avg_epa.y) %>%
+  mutate(pass_type = factor(pass_type, levels = c("short", "long"))) %>%
+  group_by(pass_type) %>%
+  summarize(y2y_avg_epa_correlation = cor(avg_epa_curr, avg_epa_next)) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("hover", "striped"))
+```
+
+> The correlation here is still stronger for *short* passes than *long* pass attempts. To answer the remaining question about players with stable YPA values, but unstable EPA values, I'll compute the change in YPA over consecutive years and do the same with the change in EPA per attempt over consecutive years. Then I'll plot the results and identify players far from the 45-degree diagonal.
+
+```{r}
+pbp_16_21 %>%
+  filter(play_type == "pass", !(is.na(air_yards))) %>%
+  mutate(pass_type = ifelse(air_yards > 20, "long", "short")) %>%
+  group_by(passer_id, passer, season, pass_type) %>%
+  summarize(passing_attempts = n(),
+            ypa = mean(passing_yards, na.rm = TRUE),
+            avg_epa = mean(epa, na.rm = TRUE),
+            .groups = "drop") %>%
+  filter(passing_attempts >= 10) %>%
+  mutate(next_season = season + 1) %>%
+  inner_join(
+    pbp_16_21 %>%
+      filter(play_type == "pass", !(is.na(air_yards))) %>%
+      mutate(pass_type = ifelse(air_yards > 20, "long", "short")) %>%
+      group_by(passer_id, passer, season, pass_type) %>%
+      summarize(passing_attempts = n(),
+                ypa = mean(passing_yards, na.rm = TRUE),
+                avg_epa = mean(epa, na.rm = TRUE),
+              .groups = "drop") %>%
+      filter(passing_attempts >= 10),
+      by = c("passer_id" = "passer_id", 
+           "passer" = "passer",
+           "next_season" = "season",
+           "pass_type" = "pass_type")
+  ) %>%
+  rename(ypa_curr = ypa.x,
+         ypa_next = ypa.y,
+         avg_epa_curr = avg_epa.x,
+         avg_epa_next = avg_epa.y) %>%
+  mutate(ypa_delta = ypa_next - ypa_curr,
+         avg_epa_delta = avg_epa_next - avg_epa_curr) %>%
+  mutate(pass_type = factor(pass_type, levels = c("short", "long"))) %>%
+  ggplot() + 
+  geom_point(aes(x = ypa_delta, y = avg_epa_delta)) + 
+  geom_text(aes(x = ypa_delta, y = avg_epa_delta, label = ifelse(abs(avg_epa_delta) > 1, passer, ""))) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed") + 
+  facet_wrap(~pass_type) + 
+  labs(
+    title = "Change in YPA with Change in Average EPA",
+    x = "Change in YPA",
+    y = "Change in Average EPA"
+  )
+```
+
+> WIth the exception of Tua, these look like players who have switched teams fairly often throughout their careers. A switch in team means a switch in coaching staff and strategy. We could plot the year in addition to the player name and then check on this hypothesis if we wanted.
+
+4. Find a cutoff that equally splits the data between *long* and *short* pass attempts and then re-run the analysis. 
+
+> I'm not going to repeat the analysis right now, but we can find the median pass attempt length to determine a more equitable cutoff than 20 yards for `air_yards`. That cutoff would be about `r round(median(pbp_16_21$air_yards, na.rm = TRUE), 1)`.
+
+## Chapter 3: Linear Regression and Rushing Yards Over Expected
+
+
+
+
+
+
+
+
+
+
