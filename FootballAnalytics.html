@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 <meta name="author" content="Adam Gilbert">
-<meta name="dcterms.date" content="2024-02-11">
+<meta name="dcterms.date" content="2024-02-14">
 
 <title>Football Analytics</title>
 <style>
@@ -73,6 +73,8 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <script src="FootballAnalytics_files/libs/kePrint-0.0.1/kePrint.js"></script>
 <link href="FootballAnalytics_files/libs/lightable-0.0.1/lightable.css" rel="stylesheet">
 
+  <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js" type="text/javascript"></script>
 
 </head>
 
@@ -90,7 +92,11 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
   <ul class="collapse">
   <li><a href="#homework-exercises" id="toc-homework-exercises" class="nav-link" data-scroll-target="#homework-exercises">Homework Exercises</a></li>
   </ul></li>
-  <li><a href="#chapter-3-linear-regression-and-rushing-yards-over-expected" id="toc-chapter-3-linear-regression-and-rushing-yards-over-expected" class="nav-link" data-scroll-target="#chapter-3-linear-regression-and-rushing-yards-over-expected">Chapter 3: Linear Regression and Rushing Yards Over Expected</a></li>
+  <li><a href="#chapter-3-linear-regression-and-rushing-yards-over-expected" id="toc-chapter-3-linear-regression-and-rushing-yards-over-expected" class="nav-link" data-scroll-target="#chapter-3-linear-regression-and-rushing-yards-over-expected">Chapter 3: Linear Regression and Rushing Yards Over Expected</a>
+  <ul class="collapse">
+  <li><a href="#exercises" id="toc-exercises" class="nav-link" data-scroll-target="#exercises">Exercises</a></li>
+  </ul></li>
+  <li><a href="#chapter-4-multiple-linear-regression-and-rushing-yards-over-expected-revisited" id="toc-chapter-4-multiple-linear-regression-and-rushing-yards-over-expected-revisited" class="nav-link" data-scroll-target="#chapter-4-multiple-linear-regression-and-rushing-yards-over-expected-revisited">Chapter 4: Multiple Linear Regression and Rushing Yards Over Expected, Revisited</a></li>
   </ul>
 </nav>
 </div>
@@ -115,7 +121,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
     <div>
     <div class="quarto-title-meta-heading">Published</div>
     <div class="quarto-title-meta-contents">
-      <p class="date">February 11, 2024</p>
+      <p class="date">February 14, 2024</p>
     </div>
   </div>
   
@@ -135,7 +141,9 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <div class="cell">
 <div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(tidyverse)</span>
 <span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(kableExtra)</span>
-<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(nflfastR)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(nflfastR)</span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(patchwork)</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(tidymodels)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <p>We can load <em>play-by-play</em> data using the <code>load_pbp()</code> function from this package. I’ll load the data from the 2021 season, as shown in the textbook.</p>
 <div class="cell">
@@ -2021,6 +2029,917 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </section>
 <section id="chapter-3-linear-regression-and-rushing-yards-over-expected" class="level2">
 <h2 class="anchored" data-anchor-id="chapter-3-linear-regression-and-rushing-yards-over-expected">Chapter 3: Linear Regression and Rushing Yards Over Expected</h2>
+<p>We’ll continue with the 2016 - 2021 play-by-play data in this chapter. Here, however, we’ll focus on rushing yards. The main ideas presented are quite interesting – basically, not all rushes are created equally. If a rusher gains 6 yards, when 8 are needed, then they did not achieve their objective. However, if a rusher gains 2 yards on a 3rd and 1, then that rusher has done their job and the play was successful. We need ways to assess the quality of a play, while controlling for the current game conditions – for example, down and yards to go.</p>
+<p>Let’s start by looking at the relationship between yards to gain (yards to a first down or touchdown) and the rushing yards gained on a running play.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb20"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a>pbp_16_21 <span class="sc">%&gt;%</span></span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">count</span>(play_type)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>── nflverse play by play data ──────────────────────────────────────────────────</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>ℹ Data updated: 2022-09-27 07:35:02 EDT</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 10 × 2
+   play_type        n
+   &lt;chr&gt;        &lt;int&gt;
+ 1 extra_point   7701
+ 2 field_goal    6214
+ 3 kickoff      16684
+ 4 no_play      27107
+ 5 pass        120804
+ 6 punt         13712
+ 7 qb_kneel      2502
+ 8 qb_spike       447
+ 9 run          83301
+10 &lt;NA&gt;         13078</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb24"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a>p1 <span class="ot">&lt;-</span> pbp_16_21 <span class="sc">%&gt;%</span></span>
+<span id="cb24-2"><a href="#cb24-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(play_type <span class="sc">==</span> <span class="st">"run"</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb24-3"><a href="#cb24-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>() <span class="sc">+</span> </span>
+<span id="cb24-4"><a href="#cb24-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="fu">aes</span>(<span class="at">x =</span> ydstogo, <span class="at">y =</span> rushing_yards), <span class="at">alpha =</span> <span class="fl">0.25</span>) <span class="sc">+</span> </span>
+<span id="cb24-5"><a href="#cb24-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_smooth</span>(<span class="fu">aes</span>(<span class="at">x =</span> ydstogo, <span class="at">y =</span> rushing_yards), <span class="at">method =</span> <span class="st">"lm"</span>) <span class="sc">+</span> </span>
+<span id="cb24-6"><a href="#cb24-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">title =</span> <span class="st">"Rushing Yards Gained versus Yards to Go"</span>,</span>
+<span id="cb24-7"><a href="#cb24-7" aria-hidden="true" tabindex="-1"></a>       <span class="at">x =</span> <span class="st">"Yards to Go"</span>,</span>
+<span id="cb24-8"><a href="#cb24-8" aria-hidden="true" tabindex="-1"></a>       <span class="at">y =</span> <span class="st">"Rushing Yards Gained"</span>)</span>
+<span id="cb24-9"><a href="#cb24-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb24-10"><a href="#cb24-10" aria-hidden="true" tabindex="-1"></a>p2 <span class="ot">&lt;-</span> pbp_16_21 <span class="sc">%&gt;%</span></span>
+<span id="cb24-11"><a href="#cb24-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(play_type <span class="sc">==</span> <span class="st">"run"</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb24-12"><a href="#cb24-12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>() <span class="sc">+</span> </span>
+<span id="cb24-13"><a href="#cb24-13" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_boxplot</span>(<span class="fu">aes</span>(<span class="at">x =</span> ydstogo, <span class="at">y =</span> rushing_yards, <span class="at">group =</span> ydstogo)) <span class="sc">+</span> </span>
+<span id="cb24-14"><a href="#cb24-14" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_smooth</span>(<span class="fu">aes</span>(<span class="at">x =</span> ydstogo, <span class="at">y =</span> rushing_yards), <span class="at">method =</span> <span class="st">"lm"</span>) <span class="sc">+</span> </span>
+<span id="cb24-15"><a href="#cb24-15" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">title =</span> <span class="st">"Rushing Yards Gained versus Yards to Go"</span>,</span>
+<span id="cb24-16"><a href="#cb24-16" aria-hidden="true" tabindex="-1"></a>       <span class="at">x =</span> <span class="st">"Yards to Go"</span>,</span>
+<span id="cb24-17"><a href="#cb24-17" aria-hidden="true" tabindex="-1"></a>       <span class="at">y =</span> <span class="st">"Rushing Yards Gained"</span>)</span>
+<span id="cb24-18"><a href="#cb24-18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb24-19"><a href="#cb24-19" aria-hidden="true" tabindex="-1"></a>p1 <span class="sc">+</span> p2</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>`geom_smooth()` using formula = 'y ~ x'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Removed 202 rows containing non-finite values (`stat_smooth()`).</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Removed 202 rows containing missing values (`geom_point()`).</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Removed 202 rows containing non-finite values (`stat_boxplot()`).</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>`geom_smooth()` using formula = 'y ~ x'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Removed 202 rows containing non-finite values (`stat_smooth()`).</code></pre>
+</div>
+<div class="cell-output-display">
+<p><img src="FootballAnalytics_files/figure-html/unnamed-chunk-14-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>This is really noisy data. Let’s see if we can get some better insight by averaging the number of rushing yards gained at each yards-to-go threshold.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb31"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb31-1"><a href="#cb31-1" aria-hidden="true" tabindex="-1"></a>pbp_16_21 <span class="sc">%&gt;%</span></span>
+<span id="cb31-2"><a href="#cb31-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(play_type <span class="sc">==</span> <span class="st">"run"</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb31-3"><a href="#cb31-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">group_by</span>(ydstogo) <span class="sc">%&gt;%</span></span>
+<span id="cb31-4"><a href="#cb31-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">summarize</span>(<span class="at">avg_rush_gain =</span> <span class="fu">mean</span>(rushing_yards)) <span class="sc">%&gt;%</span></span>
+<span id="cb31-5"><a href="#cb31-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>() <span class="sc">+</span> </span>
+<span id="cb31-6"><a href="#cb31-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="fu">aes</span>(<span class="at">x =</span> ydstogo, <span class="at">y =</span> avg_rush_gain)) <span class="sc">+</span> </span>
+<span id="cb31-7"><a href="#cb31-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_smooth</span>(<span class="fu">aes</span>(<span class="at">x =</span> ydstogo, <span class="at">y =</span> avg_rush_gain), <span class="at">method =</span> <span class="st">"lm"</span>) <span class="sc">+</span> </span>
+<span id="cb31-8"><a href="#cb31-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">title =</span> <span class="st">"Average Rush Yards Gained by Yards to Go"</span>,</span>
+<span id="cb31-9"><a href="#cb31-9" aria-hidden="true" tabindex="-1"></a>       <span class="at">x =</span> <span class="st">"Yards to Go"</span>,</span>
+<span id="cb31-10"><a href="#cb31-10" aria-hidden="true" tabindex="-1"></a>       <span class="at">y =</span> <span class="st">"Average Rushing Yards Gained"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>`geom_smooth()` using formula = 'y ~ x'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Removed 1 rows containing non-finite values (`stat_smooth()`).</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Removed 1 rows containing missing values (`geom_point()`).</code></pre>
+</div>
+<div class="cell-output-display">
+<p><img src="FootballAnalytics_files/figure-html/unnamed-chunk-15-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>Let’s build and analyse a simple linear regression model to predict rushing yards gained, by the current yards to go.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb35"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb35-1"><a href="#cb35-1" aria-hidden="true" tabindex="-1"></a>lin_reg_spec <span class="ot">&lt;-</span> <span class="fu">linear_reg</span>() <span class="sc">%&gt;%</span></span>
+<span id="cb35-2"><a href="#cb35-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">set_engine</span>(<span class="st">"lm"</span>)</span>
+<span id="cb35-3"><a href="#cb35-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb35-4"><a href="#cb35-4" aria-hidden="true" tabindex="-1"></a>lin_reg_rec <span class="ot">&lt;-</span> <span class="fu">recipe</span>(rushing_yards <span class="sc">~</span> ydstogo, <span class="at">data =</span> pbp_16_21)</span>
+<span id="cb35-5"><a href="#cb35-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb35-6"><a href="#cb35-6" aria-hidden="true" tabindex="-1"></a>lin_reg_wf <span class="ot">&lt;-</span> <span class="fu">workflow</span>() <span class="sc">%&gt;%</span></span>
+<span id="cb35-7"><a href="#cb35-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">add_model</span>(lin_reg_spec) <span class="sc">%&gt;%</span></span>
+<span id="cb35-8"><a href="#cb35-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">add_recipe</span>(lin_reg_rec)</span>
+<span id="cb35-9"><a href="#cb35-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb35-10"><a href="#cb35-10" aria-hidden="true" tabindex="-1"></a>lin_reg_fit <span class="ot">&lt;-</span> lin_reg_wf <span class="sc">%&gt;%</span></span>
+<span id="cb35-11"><a href="#cb35-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">fit</span>(pbp_16_21)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>Now that we have a fitted model, we can see the global model utility metrics below.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb36"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb36-1"><a href="#cb36-1" aria-hidden="true" tabindex="-1"></a>lin_reg_fit <span class="sc">%&gt;%</span></span>
+<span id="cb36-2"><a href="#cb36-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">glance</span>() <span class="sc">%&gt;%</span></span>
+<span id="cb36-3"><a href="#cb36-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable</span>() <span class="sc">%&gt;%</span></span>
+<span id="cb36-4"><a href="#cb36-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable_styling</span>(<span class="at">bootstrap_options =</span> <span class="fu">c</span>(<span class="st">"hover"</span>, <span class="st">"striped"</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<table class="table table-hover table-striped table-sm small" data-quarto-postprocess="true">
+<thead>
+<tr class="header">
+<th style="text-align: right;" data-quarto-table-cell-role="th">r.squared</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">adj.r.squared</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">sigma</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">statistic</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">p.value</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">df</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">logLik</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">AIC</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">BIC</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">deviance</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">df.residual</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">nobs</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: right;">0.0048077</td>
+<td style="text-align: right;">0.0047961</td>
+<td style="text-align: right;">6.284397</td>
+<td style="text-align: right;">413.5224</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">-278802.2</td>
+<td style="text-align: right;">557610.4</td>
+<td style="text-align: right;">557638.4</td>
+<td style="text-align: right;">3380617</td>
+<td style="text-align: right;">85599</td>
+<td style="text-align: right;">85601</td>
+</tr>
+</tbody>
+</table>
+
+
+</div>
+</div>
+<p>Similarly, we can see the statistical measures on the individual model terms below as well.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb37"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb37-1"><a href="#cb37-1" aria-hidden="true" tabindex="-1"></a>lin_reg_fit <span class="sc">%&gt;%</span></span>
+<span id="cb37-2"><a href="#cb37-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">extract_fit_engine</span>() <span class="sc">%&gt;%</span></span>
+<span id="cb37-3"><a href="#cb37-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">tidy</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 2 × 5
+  term        estimate std.error statistic  p.value
+  &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;    &lt;dbl&gt;
+1 (Intercept)    3.37    0.0500       67.3 0       
+2 ydstogo        0.113   0.00555      20.3 1.03e-91</code></pre>
+</div>
+</div>
+<p>We can now use our model to obtain residuals and explore Rushing Yards Over Expected (RYOE).</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb39"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb39-1"><a href="#cb39-1" aria-hidden="true" tabindex="-1"></a>lin_reg_fit <span class="sc">%&gt;%</span></span>
+<span id="cb39-2"><a href="#cb39-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">augment</span>(</span>
+<span id="cb39-3"><a href="#cb39-3" aria-hidden="true" tabindex="-1"></a>    pbp_16_21 <span class="sc">%&gt;%</span></span>
+<span id="cb39-4"><a href="#cb39-4" aria-hidden="true" tabindex="-1"></a>      <span class="fu">filter</span>(play_type <span class="sc">==</span> <span class="st">"run"</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb39-5"><a href="#cb39-5" aria-hidden="true" tabindex="-1"></a>      <span class="fu">select</span>(rusher, ydstogo, rushing_yards)</span>
+<span id="cb39-6"><a href="#cb39-6" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">%&gt;%</span></span>
+<span id="cb39-7"><a href="#cb39-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">RYOE =</span> .pred <span class="sc">-</span> rushing_yards) <span class="sc">%&gt;%</span></span>
+<span id="cb39-8"><a href="#cb39-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>() <span class="sc">+</span> </span>
+<span id="cb39-9"><a href="#cb39-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="fu">aes</span>(<span class="at">x =</span> ydstogo, <span class="at">y =</span> RYOE)) <span class="sc">+</span> </span>
+<span id="cb39-10"><a href="#cb39-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_text</span>(<span class="fu">aes</span>(<span class="at">x =</span> ydstogo, <span class="at">y =</span> RYOE, <span class="at">label =</span> <span class="fu">ifelse</span>(RYOE <span class="sc">&gt;</span> <span class="fu">quantile</span>(RYOE, <span class="fl">0.9999</span>, <span class="at">na.rm =</span> <span class="cn">TRUE</span>), rusher, <span class="st">""</span>))) <span class="sc">+</span> </span>
+<span id="cb39-11"><a href="#cb39-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ylim</span>(<span class="fu">c</span>(<span class="dv">0</span>, <span class="dv">40</span>)) <span class="sc">+</span></span>
+<span id="cb39-12"><a href="#cb39-12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">title =</span> <span class="st">"Most Successful Rushes"</span>,</span>
+<span id="cb39-13"><a href="#cb39-13" aria-hidden="true" tabindex="-1"></a>       <span class="at">x =</span> <span class="st">"Yards to Gain"</span>,</span>
+<span id="cb39-14"><a href="#cb39-14" aria-hidden="true" tabindex="-1"></a>       <span class="at">y =</span> <span class="st">"Rushing Yards Over Expected"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Removed 31358 rows containing missing values (`geom_point()`).</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Removed 31358 rows containing missing values (`geom_text()`).</code></pre>
+</div>
+<div class="cell-output-display">
+<p><img src="FootballAnalytics_files/figure-html/unnamed-chunk-19-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>Notice that those rushes which are longer than expected seemed to occur on yardages typically thought of as throwing situations. These were relatively long-yardage scenarios.</p>
+<p>Let’s dive deeper into RYOE, and understand which players had the highest average RYOE in each season. We’ll then determine the stability of the RYOE metric from one year to the next, similarly to the way we determined the stability of passing yards on short- and long- passes in the previous chapter.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb42"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb42-1"><a href="#cb42-1" aria-hidden="true" tabindex="-1"></a>lin_reg_fit <span class="sc">%&gt;%</span></span>
+<span id="cb42-2"><a href="#cb42-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">augment</span>(</span>
+<span id="cb42-3"><a href="#cb42-3" aria-hidden="true" tabindex="-1"></a>    pbp_16_21 <span class="sc">%&gt;%</span></span>
+<span id="cb42-4"><a href="#cb42-4" aria-hidden="true" tabindex="-1"></a>      <span class="fu">filter</span>(play_type <span class="sc">==</span> <span class="st">"run"</span>, <span class="sc">!</span><span class="fu">is.na</span>(rusher)) <span class="sc">%&gt;%</span></span>
+<span id="cb42-5"><a href="#cb42-5" aria-hidden="true" tabindex="-1"></a>      <span class="fu">select</span>(rusher_id, rusher, season, ydstogo, rushing_yards) <span class="sc">%&gt;%</span></span>
+<span id="cb42-6"><a href="#cb42-6" aria-hidden="true" tabindex="-1"></a>      <span class="fu">mutate</span>(<span class="at">rushing_yards =</span> <span class="fu">ifelse</span>(<span class="fu">is.na</span>(rushing_yards), <span class="dv">0</span>, rushing_yards)) </span>
+<span id="cb42-7"><a href="#cb42-7" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">%&gt;%</span></span>
+<span id="cb42-8"><a href="#cb42-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">rename</span>(<span class="at">expected_yards =</span> .pred) <span class="sc">%&gt;%</span></span>
+<span id="cb42-9"><a href="#cb42-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">ryoe =</span> rushing_yards <span class="sc">-</span> expected_yards) <span class="sc">%&gt;%</span></span>
+<span id="cb42-10"><a href="#cb42-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">group_by</span>(rusher_id, rusher, season) <span class="sc">%&gt;%</span></span>
+<span id="cb42-11"><a href="#cb42-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">summarize</span>(</span>
+<span id="cb42-12"><a href="#cb42-12" aria-hidden="true" tabindex="-1"></a>    <span class="at">runs =</span> <span class="fu">n</span>(),</span>
+<span id="cb42-13"><a href="#cb42-13" aria-hidden="true" tabindex="-1"></a>    <span class="at">avg_ryoe =</span> <span class="fu">mean</span>(ryoe),</span>
+<span id="cb42-14"><a href="#cb42-14" aria-hidden="true" tabindex="-1"></a>    <span class="at">avg_rush_yards =</span> <span class="fu">mean</span>(rushing_yards),</span>
+<span id="cb42-15"><a href="#cb42-15" aria-hidden="true" tabindex="-1"></a>    <span class="at">total_ryoe =</span> <span class="fu">sum</span>(ryoe),</span>
+<span id="cb42-16"><a href="#cb42-16" aria-hidden="true" tabindex="-1"></a>    <span class="at">total_rush_yards =</span> <span class="fu">sum</span>(rushing_yards),</span>
+<span id="cb42-17"><a href="#cb42-17" aria-hidden="true" tabindex="-1"></a>    <span class="at">.groups =</span> <span class="st">"drop"</span></span>
+<span id="cb42-18"><a href="#cb42-18" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">%&gt;%</span></span>
+<span id="cb42-19"><a href="#cb42-19" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(runs <span class="sc">&gt;=</span> <span class="dv">50</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb42-20"><a href="#cb42-20" aria-hidden="true" tabindex="-1"></a>  <span class="fu">arrange</span>(<span class="sc">-</span>avg_ryoe) <span class="sc">%&gt;%</span></span>
+<span id="cb42-21"><a href="#cb42-21" aria-hidden="true" tabindex="-1"></a>  <span class="fu">head</span>(<span class="at">n =</span> <span class="dv">20</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb42-22"><a href="#cb42-22" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable</span>() <span class="sc">%&gt;%</span></span>
+<span id="cb42-23"><a href="#cb42-23" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable_styling</span>(<span class="at">bootstrap_options =</span> <span class="fu">c</span>(<span class="st">"hover"</span>, <span class="st">"striped"</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<table class="table table-hover table-striped table-sm small" data-quarto-postprocess="true">
+<thead>
+<tr class="header">
+<th style="text-align: left;" data-quarto-table-cell-role="th">rusher_id</th>
+<th style="text-align: left;" data-quarto-table-cell-role="th">rusher</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">season</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">runs</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">avg_ryoe</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">avg_rush_yards</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">total_ryoe</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">total_rush_yards</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">00-0034796</td>
+<td style="text-align: left;">L.Jackson</td>
+<td style="text-align: right;">2019</td>
+<td style="text-align: right;">135</td>
+<td style="text-align: right;">2.614955</td>
+<td style="text-align: right;">6.800000</td>
+<td style="text-align: right;">353.01890</td>
+<td style="text-align: right;">918</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">00-0035228</td>
+<td style="text-align: left;">K.Murray</td>
+<td style="text-align: right;">2019</td>
+<td style="text-align: right;">56</td>
+<td style="text-align: right;">2.190601</td>
+<td style="text-align: right;">6.500000</td>
+<td style="text-align: right;">122.67367</td>
+<td style="text-align: right;">364</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">00-0034796</td>
+<td style="text-align: left;">L.Jackson</td>
+<td style="text-align: right;">2020</td>
+<td style="text-align: right;">121</td>
+<td style="text-align: right;">2.060473</td>
+<td style="text-align: right;">6.264463</td>
+<td style="text-align: right;">249.31724</td>
+<td style="text-align: right;">758</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">00-0034750</td>
+<td style="text-align: left;">R.Penny</td>
+<td style="text-align: right;">2021</td>
+<td style="text-align: right;">119</td>
+<td style="text-align: right;">1.949996</td>
+<td style="text-align: right;">6.294118</td>
+<td style="text-align: right;">232.04957</td>
+<td style="text-align: right;">749</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">00-0034253</td>
+<td style="text-align: left;">D.Hilliard</td>
+<td style="text-align: right;">2021</td>
+<td style="text-align: right;">56</td>
+<td style="text-align: right;">1.833827</td>
+<td style="text-align: right;">6.250000</td>
+<td style="text-align: right;">102.69430</td>
+<td style="text-align: right;">350</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">00-0034400</td>
+<td style="text-align: left;">J.Wilkins</td>
+<td style="text-align: right;">2019</td>
+<td style="text-align: right;">51</td>
+<td style="text-align: right;">1.735214</td>
+<td style="text-align: right;">6.019608</td>
+<td style="text-align: right;">88.49591</td>
+<td style="text-align: right;">307</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">00-0027939</td>
+<td style="text-align: left;">C.Newton</td>
+<td style="text-align: right;">2017</td>
+<td style="text-align: right;">99</td>
+<td style="text-align: right;">1.600412</td>
+<td style="text-align: right;">5.757576</td>
+<td style="text-align: right;">158.44081</td>
+<td style="text-align: right;">570</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">00-0030433</td>
+<td style="text-align: left;">M.Gillislee</td>
+<td style="text-align: right;">2016</td>
+<td style="text-align: right;">101</td>
+<td style="text-align: right;">1.527760</td>
+<td style="text-align: right;">5.712871</td>
+<td style="text-align: right;">154.30375</td>
+<td style="text-align: right;">577</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">00-0035719</td>
+<td style="text-align: left;">D.Samuel</td>
+<td style="text-align: right;">2021</td>
+<td style="text-align: right;">86</td>
+<td style="text-align: right;">1.513615</td>
+<td style="text-align: right;">5.837209</td>
+<td style="text-align: right;">130.17085</td>
+<td style="text-align: right;">502</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">00-0031687</td>
+<td style="text-align: left;">R.Mostert</td>
+<td style="text-align: right;">2019</td>
+<td style="text-align: right;">190</td>
+<td style="text-align: right;">1.503455</td>
+<td style="text-align: right;">5.831579</td>
+<td style="text-align: right;">285.65642</td>
+<td style="text-align: right;">1108</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">00-0036158</td>
+<td style="text-align: left;">J.Dobbins</td>
+<td style="text-align: right;">2020</td>
+<td style="text-align: right;">154</td>
+<td style="text-align: right;">1.495646</td>
+<td style="text-align: right;">5.779221</td>
+<td style="text-align: right;">230.32942</td>
+<td style="text-align: right;">890</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">00-0035228</td>
+<td style="text-align: left;">K.Murray</td>
+<td style="text-align: right;">2020</td>
+<td style="text-align: right;">75</td>
+<td style="text-align: right;">1.454345</td>
+<td style="text-align: right;">5.560000</td>
+<td style="text-align: right;">109.07590</td>
+<td style="text-align: right;">417</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">00-0034750</td>
+<td style="text-align: left;">R.Penny</td>
+<td style="text-align: right;">2019</td>
+<td style="text-align: right;">65</td>
+<td style="text-align: right;">1.429865</td>
+<td style="text-align: right;">5.692308</td>
+<td style="text-align: right;">92.94121</td>
+<td style="text-align: right;">370</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">00-0034845</td>
+<td style="text-align: left;">S.Michel</td>
+<td style="text-align: right;">2020</td>
+<td style="text-align: right;">79</td>
+<td style="text-align: right;">1.426704</td>
+<td style="text-align: right;">5.683544</td>
+<td style="text-align: right;">112.70960</td>
+<td style="text-align: right;">449</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">00-0034400</td>
+<td style="text-align: left;">J.Wilkins</td>
+<td style="text-align: right;">2018</td>
+<td style="text-align: right;">62</td>
+<td style="text-align: right;">1.346165</td>
+<td style="text-align: right;">5.564516</td>
+<td style="text-align: right;">83.46221</td>
+<td style="text-align: right;">345</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">00-0034857</td>
+<td style="text-align: left;">J.Allen</td>
+<td style="text-align: right;">2021</td>
+<td style="text-align: right;">80</td>
+<td style="text-align: right;">1.330091</td>
+<td style="text-align: right;">5.337500</td>
+<td style="text-align: right;">106.40730</td>
+<td style="text-align: right;">427</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">00-0033906</td>
+<td style="text-align: left;">A.Kamara</td>
+<td style="text-align: right;">2017</td>
+<td style="text-align: right;">142</td>
+<td style="text-align: right;">1.307716</td>
+<td style="text-align: right;">5.591549</td>
+<td style="text-align: right;">185.69569</td>
+<td style="text-align: right;">794</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">00-0033293</td>
+<td style="text-align: left;">A.Jones</td>
+<td style="text-align: right;">2020</td>
+<td style="text-align: right;">222</td>
+<td style="text-align: right;">1.303468</td>
+<td style="text-align: right;">5.540540</td>
+<td style="text-align: right;">289.36990</td>
+<td style="text-align: right;">1230</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">00-0033293</td>
+<td style="text-align: left;">A.Jones</td>
+<td style="text-align: right;">2017</td>
+<td style="text-align: right;">81</td>
+<td style="text-align: right;">1.295956</td>
+<td style="text-align: right;">5.530864</td>
+<td style="text-align: right;">104.97245</td>
+<td style="text-align: right;">448</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">00-0033025</td>
+<td style="text-align: left;">J.Richard</td>
+<td style="text-align: right;">2016</td>
+<td style="text-align: right;">86</td>
+<td style="text-align: right;">1.277601</td>
+<td style="text-align: right;">5.744186</td>
+<td style="text-align: right;">109.87367</td>
+<td style="text-align: right;">494</td>
+</tr>
+</tbody>
+</table>
+
+
+</div>
+</div>
+<p>As in the textbook, we see several Quarterbacks at the top of the list. In particular, Lamar Jackson had several great seasons, as measured by RYOE. This is part of what led to him being given an enormous contract in 2023.</p>
+<p>If we arrange rushers by <code>total_ryoe</code> rather than <code>avg_ryoe</code>, we see the following results.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb43"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb43-1"><a href="#cb43-1" aria-hidden="true" tabindex="-1"></a>lin_reg_fit <span class="sc">%&gt;%</span></span>
+<span id="cb43-2"><a href="#cb43-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">augment</span>(</span>
+<span id="cb43-3"><a href="#cb43-3" aria-hidden="true" tabindex="-1"></a>    pbp_16_21 <span class="sc">%&gt;%</span></span>
+<span id="cb43-4"><a href="#cb43-4" aria-hidden="true" tabindex="-1"></a>      <span class="fu">filter</span>(play_type <span class="sc">==</span> <span class="st">"run"</span>, <span class="sc">!</span><span class="fu">is.na</span>(rusher)) <span class="sc">%&gt;%</span></span>
+<span id="cb43-5"><a href="#cb43-5" aria-hidden="true" tabindex="-1"></a>      <span class="fu">select</span>(rusher_id, rusher, season, ydstogo, rushing_yards) <span class="sc">%&gt;%</span></span>
+<span id="cb43-6"><a href="#cb43-6" aria-hidden="true" tabindex="-1"></a>      <span class="fu">mutate</span>(<span class="at">rushing_yards =</span> <span class="fu">ifelse</span>(<span class="fu">is.na</span>(rushing_yards), <span class="dv">0</span>, rushing_yards)) </span>
+<span id="cb43-7"><a href="#cb43-7" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">%&gt;%</span></span>
+<span id="cb43-8"><a href="#cb43-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">rename</span>(<span class="at">expected_yards =</span> .pred) <span class="sc">%&gt;%</span></span>
+<span id="cb43-9"><a href="#cb43-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">ryoe =</span> rushing_yards <span class="sc">-</span> expected_yards) <span class="sc">%&gt;%</span></span>
+<span id="cb43-10"><a href="#cb43-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">group_by</span>(rusher_id, rusher, season) <span class="sc">%&gt;%</span></span>
+<span id="cb43-11"><a href="#cb43-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">summarize</span>(</span>
+<span id="cb43-12"><a href="#cb43-12" aria-hidden="true" tabindex="-1"></a>    <span class="at">runs =</span> <span class="fu">n</span>(),</span>
+<span id="cb43-13"><a href="#cb43-13" aria-hidden="true" tabindex="-1"></a>    <span class="at">avg_ryoe =</span> <span class="fu">mean</span>(ryoe),</span>
+<span id="cb43-14"><a href="#cb43-14" aria-hidden="true" tabindex="-1"></a>    <span class="at">avg_rush_yards =</span> <span class="fu">mean</span>(rushing_yards),</span>
+<span id="cb43-15"><a href="#cb43-15" aria-hidden="true" tabindex="-1"></a>    <span class="at">total_ryoe =</span> <span class="fu">sum</span>(ryoe),</span>
+<span id="cb43-16"><a href="#cb43-16" aria-hidden="true" tabindex="-1"></a>    <span class="at">total_rush_yards =</span> <span class="fu">sum</span>(rushing_yards),</span>
+<span id="cb43-17"><a href="#cb43-17" aria-hidden="true" tabindex="-1"></a>    <span class="at">.groups =</span> <span class="st">"drop"</span></span>
+<span id="cb43-18"><a href="#cb43-18" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">%&gt;%</span></span>
+<span id="cb43-19"><a href="#cb43-19" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(runs <span class="sc">&gt;=</span> <span class="dv">50</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb43-20"><a href="#cb43-20" aria-hidden="true" tabindex="-1"></a>  <span class="fu">arrange</span>(<span class="sc">-</span>total_ryoe) <span class="sc">%&gt;%</span></span>
+<span id="cb43-21"><a href="#cb43-21" aria-hidden="true" tabindex="-1"></a>  <span class="fu">head</span>(<span class="at">n =</span> <span class="dv">20</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb43-22"><a href="#cb43-22" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable</span>() <span class="sc">%&gt;%</span></span>
+<span id="cb43-23"><a href="#cb43-23" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable_styling</span>(<span class="at">bootstrap_options =</span> <span class="fu">c</span>(<span class="st">"hover"</span>, <span class="st">"striped"</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<table class="table table-hover table-striped table-sm small" data-quarto-postprocess="true">
+<thead>
+<tr class="header">
+<th style="text-align: left;" data-quarto-table-cell-role="th">rusher_id</th>
+<th style="text-align: left;" data-quarto-table-cell-role="th">rusher</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">season</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">runs</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">avg_ryoe</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">avg_rush_yards</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">total_ryoe</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">total_rush_yards</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">00-0036223</td>
+<td style="text-align: left;">J.Taylor</td>
+<td style="text-align: right;">2021</td>
+<td style="text-align: right;">332</td>
+<td style="text-align: right;">1.2553987</td>
+<td style="text-align: right;">5.454819</td>
+<td style="text-align: right;">416.7924</td>
+<td style="text-align: right;">1811</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">00-0032764</td>
+<td style="text-align: left;">D.Henry</td>
+<td style="text-align: right;">2020</td>
+<td style="text-align: right;">397</td>
+<td style="text-align: right;">0.9260500</td>
+<td style="text-align: right;">5.206549</td>
+<td style="text-align: right;">367.6419</td>
+<td style="text-align: right;">2067</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">00-0034796</td>
+<td style="text-align: left;">L.Jackson</td>
+<td style="text-align: right;">2019</td>
+<td style="text-align: right;">135</td>
+<td style="text-align: right;">2.6149548</td>
+<td style="text-align: right;">6.800000</td>
+<td style="text-align: right;">353.0189</td>
+<td style="text-align: right;">918</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">00-0032764</td>
+<td style="text-align: left;">D.Henry</td>
+<td style="text-align: right;">2019</td>
+<td style="text-align: right;">387</td>
+<td style="text-align: right;">0.8495839</td>
+<td style="text-align: right;">5.131783</td>
+<td style="text-align: right;">328.7890</td>
+<td style="text-align: right;">1986</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">00-0033293</td>
+<td style="text-align: left;">A.Jones</td>
+<td style="text-align: right;">2020</td>
+<td style="text-align: right;">222</td>
+<td style="text-align: right;">1.3034680</td>
+<td style="text-align: right;">5.540540</td>
+<td style="text-align: right;">289.3699</td>
+<td style="text-align: right;">1230</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">00-0031687</td>
+<td style="text-align: left;">R.Mostert</td>
+<td style="text-align: right;">2019</td>
+<td style="text-align: right;">190</td>
+<td style="text-align: right;">1.5034548</td>
+<td style="text-align: right;">5.831579</td>
+<td style="text-align: right;">285.6564</td>
+<td style="text-align: right;">1108</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">00-0033045</td>
+<td style="text-align: left;">E.Elliott</td>
+<td style="text-align: right;">2016</td>
+<td style="text-align: right;">344</td>
+<td style="text-align: right;">0.8223793</td>
+<td style="text-align: right;">5.104651</td>
+<td style="text-align: right;">282.8985</td>
+<td style="text-align: right;">1756</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">00-0034791</td>
+<td style="text-align: left;">N.Chubb</td>
+<td style="text-align: right;">2021</td>
+<td style="text-align: right;">228</td>
+<td style="text-align: right;">1.2250781</td>
+<td style="text-align: right;">5.521930</td>
+<td style="text-align: right;">279.3178</td>
+<td style="text-align: right;">1259</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">00-0034791</td>
+<td style="text-align: left;">N.Chubb</td>
+<td style="text-align: right;">2020</td>
+<td style="text-align: right;">221</td>
+<td style="text-align: right;">1.1657052</td>
+<td style="text-align: right;">5.475113</td>
+<td style="text-align: right;">257.6208</td>
+<td style="text-align: right;">1210</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">00-0034796</td>
+<td style="text-align: left;">L.Jackson</td>
+<td style="text-align: right;">2020</td>
+<td style="text-align: right;">121</td>
+<td style="text-align: right;">2.0604730</td>
+<td style="text-align: right;">6.264463</td>
+<td style="text-align: right;">249.3172</td>
+<td style="text-align: right;">758</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">00-0027029</td>
+<td style="text-align: left;">L.McCoy</td>
+<td style="text-align: right;">2016</td>
+<td style="text-align: right;">235</td>
+<td style="text-align: right;">0.9902672</td>
+<td style="text-align: right;">5.391489</td>
+<td style="text-align: right;">232.7128</td>
+<td style="text-align: right;">1267</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">00-0034750</td>
+<td style="text-align: left;">R.Penny</td>
+<td style="text-align: right;">2021</td>
+<td style="text-align: right;">119</td>
+<td style="text-align: right;">1.9499964</td>
+<td style="text-align: right;">6.294118</td>
+<td style="text-align: right;">232.0496</td>
+<td style="text-align: right;">749</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">00-0036158</td>
+<td style="text-align: left;">J.Dobbins</td>
+<td style="text-align: right;">2020</td>
+<td style="text-align: right;">154</td>
+<td style="text-align: right;">1.4956456</td>
+<td style="text-align: right;">5.779221</td>
+<td style="text-align: right;">230.3294</td>
+<td style="text-align: right;">890</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">00-0032780</td>
+<td style="text-align: left;">J.Howard</td>
+<td style="text-align: right;">2016</td>
+<td style="text-align: right;">252</td>
+<td style="text-align: right;">0.9100963</td>
+<td style="text-align: right;">5.210318</td>
+<td style="text-align: right;">229.3443</td>
+<td style="text-align: right;">1313</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">00-0030496</td>
+<td style="text-align: left;">L.Bell</td>
+<td style="text-align: right;">2016</td>
+<td style="text-align: right;">326</td>
+<td style="text-align: right;">0.7010829</td>
+<td style="text-align: right;">4.984663</td>
+<td style="text-align: right;">228.5530</td>
+<td style="text-align: right;">1625</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">00-0033893</td>
+<td style="text-align: left;">D.Cook</td>
+<td style="text-align: right;">2020</td>
+<td style="text-align: right;">315</td>
+<td style="text-align: right;">0.6975229</td>
+<td style="text-align: right;">4.942857</td>
+<td style="text-align: right;">219.7197</td>
+<td style="text-align: right;">1557</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">00-0034791</td>
+<td style="text-align: left;">N.Chubb</td>
+<td style="text-align: right;">2019</td>
+<td style="text-align: right;">298</td>
+<td style="text-align: right;">0.6938428</td>
+<td style="text-align: right;">5.013423</td>
+<td style="text-align: right;">206.7651</td>
+<td style="text-align: right;">1494</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">00-0034109</td>
+<td style="text-align: left;">P.Lindsay</td>
+<td style="text-align: right;">2018</td>
+<td style="text-align: right;">193</td>
+<td style="text-align: right;">1.0563408</td>
+<td style="text-align: right;">5.373057</td>
+<td style="text-align: right;">203.8738</td>
+<td style="text-align: right;">1037</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">00-0033906</td>
+<td style="text-align: left;">A.Kamara</td>
+<td style="text-align: right;">2017</td>
+<td style="text-align: right;">142</td>
+<td style="text-align: right;">1.3077161</td>
+<td style="text-align: right;">5.591549</td>
+<td style="text-align: right;">185.6957</td>
+<td style="text-align: right;">794</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">00-0036223</td>
+<td style="text-align: left;">J.Taylor</td>
+<td style="text-align: right;">2020</td>
+<td style="text-align: right;">254</td>
+<td style="text-align: right;">0.6942925</td>
+<td style="text-align: right;">4.909449</td>
+<td style="text-align: right;">176.3503</td>
+<td style="text-align: right;">1247</td>
+</tr>
+</tbody>
+</table>
+
+
+</div>
+</div>
+<p>Again, like the text, we see Jonathan Taylor and Derrick Henry topping this list.</p>
+<p>Now let’s see whether <code>avg_ryoe</code> and <code>total_ryoe</code> are stable metrics from one year to the next.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb44"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb44-1"><a href="#cb44-1" aria-hidden="true" tabindex="-1"></a>rush_stats_16_21 <span class="ot">&lt;-</span> lin_reg_fit <span class="sc">%&gt;%</span></span>
+<span id="cb44-2"><a href="#cb44-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">augment</span>(</span>
+<span id="cb44-3"><a href="#cb44-3" aria-hidden="true" tabindex="-1"></a>    pbp_16_21 <span class="sc">%&gt;%</span></span>
+<span id="cb44-4"><a href="#cb44-4" aria-hidden="true" tabindex="-1"></a>      <span class="fu">filter</span>(play_type <span class="sc">==</span> <span class="st">"run"</span>, <span class="sc">!</span><span class="fu">is.na</span>(rusher)) <span class="sc">%&gt;%</span></span>
+<span id="cb44-5"><a href="#cb44-5" aria-hidden="true" tabindex="-1"></a>      <span class="fu">select</span>(rusher_id, rusher, season, ydstogo, rushing_yards) <span class="sc">%&gt;%</span></span>
+<span id="cb44-6"><a href="#cb44-6" aria-hidden="true" tabindex="-1"></a>      <span class="fu">mutate</span>(<span class="at">rushing_yards =</span> <span class="fu">ifelse</span>(<span class="fu">is.na</span>(rushing_yards), <span class="dv">0</span>, rushing_yards)) </span>
+<span id="cb44-7"><a href="#cb44-7" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">%&gt;%</span></span>
+<span id="cb44-8"><a href="#cb44-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">rename</span>(<span class="at">expected_yards =</span> .pred) <span class="sc">%&gt;%</span></span>
+<span id="cb44-9"><a href="#cb44-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">ryoe =</span> rushing_yards <span class="sc">-</span> expected_yards) <span class="sc">%&gt;%</span></span>
+<span id="cb44-10"><a href="#cb44-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">group_by</span>(rusher_id, rusher, season) <span class="sc">%&gt;%</span></span>
+<span id="cb44-11"><a href="#cb44-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">summarize</span>(</span>
+<span id="cb44-12"><a href="#cb44-12" aria-hidden="true" tabindex="-1"></a>    <span class="at">runs =</span> <span class="fu">n</span>(),</span>
+<span id="cb44-13"><a href="#cb44-13" aria-hidden="true" tabindex="-1"></a>    <span class="at">avg_ryoe =</span> <span class="fu">mean</span>(ryoe),</span>
+<span id="cb44-14"><a href="#cb44-14" aria-hidden="true" tabindex="-1"></a>    <span class="at">avg_rush_yards =</span> <span class="fu">mean</span>(rushing_yards),</span>
+<span id="cb44-15"><a href="#cb44-15" aria-hidden="true" tabindex="-1"></a>    <span class="at">total_ryoe =</span> <span class="fu">sum</span>(ryoe),</span>
+<span id="cb44-16"><a href="#cb44-16" aria-hidden="true" tabindex="-1"></a>    <span class="at">total_rush_yards =</span> <span class="fu">sum</span>(rushing_yards),</span>
+<span id="cb44-17"><a href="#cb44-17" aria-hidden="true" tabindex="-1"></a>    <span class="at">.groups =</span> <span class="st">"drop"</span></span>
+<span id="cb44-18"><a href="#cb44-18" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">%&gt;%</span></span>
+<span id="cb44-19"><a href="#cb44-19" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(runs <span class="sc">&gt;</span> <span class="dv">50</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb44-20"><a href="#cb44-20" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">next_season =</span> season <span class="sc">+</span> <span class="dv">1</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb44-21"><a href="#cb44-21" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(rusher_id, rusher, season, next_season, runs, avg_ryoe, </span>
+<span id="cb44-22"><a href="#cb44-22" aria-hidden="true" tabindex="-1"></a>         avg_rush_yards, total_ryoe, total_rush_yards)</span>
+<span id="cb44-23"><a href="#cb44-23" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb44-24"><a href="#cb44-24" aria-hidden="true" tabindex="-1"></a>rush_stats_16_21 <span class="sc">%&gt;%</span></span>
+<span id="cb44-25"><a href="#cb44-25" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(<span class="sc">-</span>season) <span class="sc">%&gt;%</span></span>
+<span id="cb44-26"><a href="#cb44-26" aria-hidden="true" tabindex="-1"></a>  <span class="fu">inner_join</span>(</span>
+<span id="cb44-27"><a href="#cb44-27" aria-hidden="true" tabindex="-1"></a>    rush_stats_16_21 <span class="sc">%&gt;%</span></span>
+<span id="cb44-28"><a href="#cb44-28" aria-hidden="true" tabindex="-1"></a>      <span class="fu">select</span>(<span class="sc">-</span>next_season),</span>
+<span id="cb44-29"><a href="#cb44-29" aria-hidden="true" tabindex="-1"></a>    <span class="at">by =</span> <span class="fu">c</span>(<span class="st">"rusher_id"</span> <span class="ot">=</span> <span class="st">"rusher_id"</span>, <span class="st">"rusher"</span> <span class="ot">=</span> <span class="st">"rusher"</span>, <span class="st">"next_season"</span> <span class="ot">=</span> <span class="st">"season"</span>)</span>
+<span id="cb44-30"><a href="#cb44-30" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">%&gt;%</span></span>
+<span id="cb44-31"><a href="#cb44-31" aria-hidden="true" tabindex="-1"></a>    <span class="fu">summarize</span>(</span>
+<span id="cb44-32"><a href="#cb44-32" aria-hidden="true" tabindex="-1"></a>      <span class="at">rushes =</span> <span class="fu">cor</span>(runs.x, runs.y),</span>
+<span id="cb44-33"><a href="#cb44-33" aria-hidden="true" tabindex="-1"></a>      <span class="at">avg_ryoe =</span> <span class="fu">cor</span>(avg_ryoe.x, avg_ryoe.y),</span>
+<span id="cb44-34"><a href="#cb44-34" aria-hidden="true" tabindex="-1"></a>      <span class="at">avg_rush_yds =</span> <span class="fu">cor</span>(avg_rush_yards.x, avg_rush_yards.y),</span>
+<span id="cb44-35"><a href="#cb44-35" aria-hidden="true" tabindex="-1"></a>      <span class="at">total_ryoe =</span> <span class="fu">cor</span>(total_ryoe.x, total_ryoe.y),</span>
+<span id="cb44-36"><a href="#cb44-36" aria-hidden="true" tabindex="-1"></a>      <span class="at">total_rush_yds =</span> <span class="fu">cor</span>(total_rush_yards.x, total_rush_yards.y)</span>
+<span id="cb44-37"><a href="#cb44-37" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">%&gt;%</span></span>
+<span id="cb44-38"><a href="#cb44-38" aria-hidden="true" tabindex="-1"></a>  <span class="fu">pivot_longer</span>(<span class="at">cols =</span> <span class="fu">everything</span>(), <span class="at">names_to =</span> <span class="st">"metric"</span>, <span class="at">values_to =</span> <span class="st">"y2y_correlation"</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb44-39"><a href="#cb44-39" aria-hidden="true" tabindex="-1"></a>  <span class="fu">arrange</span>(<span class="sc">-</span>y2y_correlation) <span class="sc">%&gt;%</span></span>
+<span id="cb44-40"><a href="#cb44-40" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable</span>() <span class="sc">%&gt;%</span></span>
+<span id="cb44-41"><a href="#cb44-41" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable_styling</span>(<span class="at">bootstrap_options =</span> <span class="fu">c</span>(<span class="st">"hover"</span>, <span class="st">"striped"</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<table class="table table-hover table-striped table-sm small" data-quarto-postprocess="true">
+<thead>
+<tr class="header">
+<th style="text-align: left;" data-quarto-table-cell-role="th">metric</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">y2y_correlation</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">rushes</td>
+<td style="text-align: right;">0.5714508</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">total_rush_yds</td>
+<td style="text-align: right;">0.5673598</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">avg_ryoe</td>
+<td style="text-align: right;">0.3447669</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">total_ryoe</td>
+<td style="text-align: right;">0.3349978</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">avg_rush_yds</td>
+<td style="text-align: right;">0.3242970</td>
+</tr>
+</tbody>
+</table>
+
+
+</div>
+</div>
+<p>Notice that <code>total_rush_yds</code>, and <code>total_ryoe</code> are difficult to interpret because volume is a masked variable in both of these measures. These metrics actually measure two things – the frequency of run attempts and the length of each run. We aren’t reproducing the exact numbers from the textbook here. I’m wondering if that is due to stat updates, or if my code is not identical to the code found in the text.</p>
+<section id="exercises" class="level3">
+<h3 class="anchored" data-anchor-id="exercises">Exercises</h3>
+<ol type="1">
+<li>What happens if you repeat the correlation analysis, but use 100 rushes per season as the threshold rather than 50? Are the takeaways regarding stability the same?</li>
+</ol>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb45"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb45-1"><a href="#cb45-1" aria-hidden="true" tabindex="-1"></a>rush_stats_16_21 <span class="ot">&lt;-</span> lin_reg_fit <span class="sc">%&gt;%</span></span>
+<span id="cb45-2"><a href="#cb45-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">augment</span>(</span>
+<span id="cb45-3"><a href="#cb45-3" aria-hidden="true" tabindex="-1"></a>    pbp_16_21 <span class="sc">%&gt;%</span></span>
+<span id="cb45-4"><a href="#cb45-4" aria-hidden="true" tabindex="-1"></a>      <span class="fu">filter</span>(play_type <span class="sc">==</span> <span class="st">"run"</span>, <span class="sc">!</span><span class="fu">is.na</span>(rusher)) <span class="sc">%&gt;%</span></span>
+<span id="cb45-5"><a href="#cb45-5" aria-hidden="true" tabindex="-1"></a>      <span class="fu">select</span>(rusher_id, rusher, season, ydstogo, rushing_yards) <span class="sc">%&gt;%</span></span>
+<span id="cb45-6"><a href="#cb45-6" aria-hidden="true" tabindex="-1"></a>      <span class="fu">mutate</span>(<span class="at">rushing_yards =</span> <span class="fu">ifelse</span>(<span class="fu">is.na</span>(rushing_yards), <span class="dv">0</span>, rushing_yards)) </span>
+<span id="cb45-7"><a href="#cb45-7" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">%&gt;%</span></span>
+<span id="cb45-8"><a href="#cb45-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">rename</span>(<span class="at">expected_yards =</span> .pred) <span class="sc">%&gt;%</span></span>
+<span id="cb45-9"><a href="#cb45-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">ryoe =</span> rushing_yards <span class="sc">-</span> expected_yards) <span class="sc">%&gt;%</span></span>
+<span id="cb45-10"><a href="#cb45-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">group_by</span>(rusher_id, rusher, season) <span class="sc">%&gt;%</span></span>
+<span id="cb45-11"><a href="#cb45-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">summarize</span>(</span>
+<span id="cb45-12"><a href="#cb45-12" aria-hidden="true" tabindex="-1"></a>    <span class="at">runs =</span> <span class="fu">n</span>(),</span>
+<span id="cb45-13"><a href="#cb45-13" aria-hidden="true" tabindex="-1"></a>    <span class="at">avg_ryoe =</span> <span class="fu">mean</span>(ryoe),</span>
+<span id="cb45-14"><a href="#cb45-14" aria-hidden="true" tabindex="-1"></a>    <span class="at">avg_rush_yards =</span> <span class="fu">mean</span>(rushing_yards),</span>
+<span id="cb45-15"><a href="#cb45-15" aria-hidden="true" tabindex="-1"></a>    <span class="at">total_ryoe =</span> <span class="fu">sum</span>(ryoe),</span>
+<span id="cb45-16"><a href="#cb45-16" aria-hidden="true" tabindex="-1"></a>    <span class="at">total_rush_yards =</span> <span class="fu">sum</span>(rushing_yards),</span>
+<span id="cb45-17"><a href="#cb45-17" aria-hidden="true" tabindex="-1"></a>    <span class="at">.groups =</span> <span class="st">"drop"</span></span>
+<span id="cb45-18"><a href="#cb45-18" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">%&gt;%</span></span>
+<span id="cb45-19"><a href="#cb45-19" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(runs <span class="sc">&gt;</span> <span class="dv">100</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb45-20"><a href="#cb45-20" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">next_season =</span> season <span class="sc">+</span> <span class="dv">1</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb45-21"><a href="#cb45-21" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(rusher_id, rusher, season, next_season, runs, avg_ryoe, </span>
+<span id="cb45-22"><a href="#cb45-22" aria-hidden="true" tabindex="-1"></a>         avg_rush_yards, total_ryoe, total_rush_yards)</span>
+<span id="cb45-23"><a href="#cb45-23" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb45-24"><a href="#cb45-24" aria-hidden="true" tabindex="-1"></a>rush_stats_16_21 <span class="sc">%&gt;%</span></span>
+<span id="cb45-25"><a href="#cb45-25" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(<span class="sc">-</span>season) <span class="sc">%&gt;%</span></span>
+<span id="cb45-26"><a href="#cb45-26" aria-hidden="true" tabindex="-1"></a>  <span class="fu">inner_join</span>(</span>
+<span id="cb45-27"><a href="#cb45-27" aria-hidden="true" tabindex="-1"></a>    rush_stats_16_21 <span class="sc">%&gt;%</span></span>
+<span id="cb45-28"><a href="#cb45-28" aria-hidden="true" tabindex="-1"></a>      <span class="fu">select</span>(<span class="sc">-</span>next_season),</span>
+<span id="cb45-29"><a href="#cb45-29" aria-hidden="true" tabindex="-1"></a>    <span class="at">by =</span> <span class="fu">c</span>(<span class="st">"rusher_id"</span> <span class="ot">=</span> <span class="st">"rusher_id"</span>, <span class="st">"rusher"</span> <span class="ot">=</span> <span class="st">"rusher"</span>, <span class="st">"next_season"</span> <span class="ot">=</span> <span class="st">"season"</span>)</span>
+<span id="cb45-30"><a href="#cb45-30" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">%&gt;%</span></span>
+<span id="cb45-31"><a href="#cb45-31" aria-hidden="true" tabindex="-1"></a>    <span class="fu">summarize</span>(</span>
+<span id="cb45-32"><a href="#cb45-32" aria-hidden="true" tabindex="-1"></a>      <span class="at">rushes =</span> <span class="fu">cor</span>(runs.x, runs.y),</span>
+<span id="cb45-33"><a href="#cb45-33" aria-hidden="true" tabindex="-1"></a>      <span class="at">avg_ryoe =</span> <span class="fu">cor</span>(avg_ryoe.x, avg_ryoe.y),</span>
+<span id="cb45-34"><a href="#cb45-34" aria-hidden="true" tabindex="-1"></a>      <span class="at">avg_rush_yds =</span> <span class="fu">cor</span>(avg_rush_yards.x, avg_rush_yards.y),</span>
+<span id="cb45-35"><a href="#cb45-35" aria-hidden="true" tabindex="-1"></a>      <span class="at">total_ryoe =</span> <span class="fu">cor</span>(total_ryoe.x, total_ryoe.y),</span>
+<span id="cb45-36"><a href="#cb45-36" aria-hidden="true" tabindex="-1"></a>      <span class="at">total_rush_yds =</span> <span class="fu">cor</span>(total_rush_yards.x, total_rush_yards.y)</span>
+<span id="cb45-37"><a href="#cb45-37" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">%&gt;%</span></span>
+<span id="cb45-38"><a href="#cb45-38" aria-hidden="true" tabindex="-1"></a>  <span class="fu">pivot_longer</span>(<span class="at">cols =</span> <span class="fu">everything</span>(), <span class="at">names_to =</span> <span class="st">"metric"</span>, <span class="at">values_to =</span> <span class="st">"y2y_correlation"</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb45-39"><a href="#cb45-39" aria-hidden="true" tabindex="-1"></a>  <span class="fu">arrange</span>(<span class="sc">-</span>y2y_correlation) <span class="sc">%&gt;%</span></span>
+<span id="cb45-40"><a href="#cb45-40" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable</span>() <span class="sc">%&gt;%</span></span>
+<span id="cb45-41"><a href="#cb45-41" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable_styling</span>(<span class="at">bootstrap_options =</span> <span class="fu">c</span>(<span class="st">"hover"</span>, <span class="st">"striped"</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<table class="table table-hover table-striped table-sm small" data-quarto-postprocess="true">
+<thead>
+<tr class="header">
+<th style="text-align: left;" data-quarto-table-cell-role="th">metric</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">y2y_correlation</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">total_rush_yds</td>
+<td style="text-align: right;">0.3965560</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">rushes</td>
+<td style="text-align: right;">0.3902246</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">avg_ryoe</td>
+<td style="text-align: right;">0.3872270</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">avg_rush_yds</td>
+<td style="text-align: right;">0.3715146</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">total_ryoe</td>
+<td style="text-align: right;">0.3466021</td>
+</tr>
+</tbody>
+</table>
+
+
+</div>
+</div>
+<blockquote class="blockquote">
+<p>We do see that <code>avg_ryoe</code> is still a more stable measure than <code>avg_rush_yds</code> from one year to the next. The different in correlations is similar – about <span class="math inline">\(0.016\)</span> versus <span class="math inline">\(0.013\)</span> – although, this is about a 23% increase in the difference. Interestingly, we see that the correlation between total runs and total rush yards from year to year has dropped significantly. This indicates that dominant rushers (rushers getting lots of carries) don’t generally hold over from one year to the next. This could be due to wear and tear on the position.</p>
+</blockquote>
+<ol start="2" type="1">
+<li>Assume that all of Mike Alstott’s carries were on 3rd and 1 situations, while all Warrick Dunn’s carries were on 1st and 10s. Is situation alone enough to explain the difference between the yards per carry for these two players (3.7 yards per carry versus 4.0 yards per carry)?</li>
+</ol>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb46"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb46-1"><a href="#cb46-1" aria-hidden="true" tabindex="-1"></a>lin_reg_fit <span class="sc">%&gt;%</span></span>
+<span id="cb46-2"><a href="#cb46-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">extract_fit_engine</span>() <span class="sc">%&gt;%</span></span>
+<span id="cb46-3"><a href="#cb46-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">tidy</span>() <span class="sc">%&gt;%</span></span>
+<span id="cb46-4"><a href="#cb46-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable</span>() <span class="sc">%&gt;%</span></span>
+<span id="cb46-5"><a href="#cb46-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable_styling</span>(<span class="at">bootstrap_options =</span> <span class="fu">c</span>(<span class="st">"hover"</span>, <span class="st">"striped"</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<table class="table table-hover table-striped table-sm small" data-quarto-postprocess="true">
+<thead>
+<tr class="header">
+<th style="text-align: left;" data-quarto-table-cell-role="th">term</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">estimate</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">std.error</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">statistic</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">p.value</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">(Intercept)</td>
+<td style="text-align: right;">3.3685760</td>
+<td style="text-align: right;">0.0500332</td>
+<td style="text-align: right;">67.32679</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">ydstogo</td>
+<td style="text-align: right;">0.1128182</td>
+<td style="text-align: right;">0.0055479</td>
+<td style="text-align: right;">20.33525</td>
+<td style="text-align: right;">0</td>
+</tr>
+</tbody>
+</table>
+
+
+</div>
+</div>
+<blockquote class="blockquote">
+<p>Notice that the coefficient on yards to go in the regression model is about 0.113. If we multiply this by 9 (the difference in the assumed yards to go measures), we expect a difference of about a full yard (in terms of expected rushing yards). This would be more than enough to explain the difference in yards per carry for these two backs.</p>
+</blockquote>
+<ol start="3" type="1">
+<li>What happens if you repeat the analyses in the chapter with yards to the endzone (<code>yard_line_100</code>) rather than yards to gain?</li>
+</ol>
+<blockquote class="blockquote">
+<p>I’m omitting this for now, but it should be simple to do.</p>
+</blockquote>
+<ol start="4" type="1">
+<li>Conduct an analysis analogous to the one in this chapter, but for receivers and the passing game.</li>
+</ol>
+<blockquote class="blockquote">
+<p>Again, I’m omitting for now, but it should be easy to conduct.</p>
+</blockquote>
+</section>
+</section>
+<section id="chapter-4-multiple-linear-regression-and-rushing-yards-over-expected-revisited" class="level2">
+<h2 class="anchored" data-anchor-id="chapter-4-multiple-linear-regression-and-rushing-yards-over-expected-revisited">Chapter 4: Multiple Linear Regression and Rushing Yards Over Expected, Revisited</h2>
+<p>In Chapter 3, we controlled for just a single variable. However, the result of a rushing play is almost surely to depend on more than simply the <em>yards to gain</em>. For example, A 2nd and 1 is a very different play than a 4th and 1. In the former, the defense may expect a long passing play and needs to defend against that, while in the latter, it is much more likely that the offense will simply try to reach the line to gain and so defenses in these situations are defending primarily against short plays.</p>
+<p>In this chapter, we’ll build our regression model to control for more gameplay scenarios.</p>
 </section>
 
 </main>

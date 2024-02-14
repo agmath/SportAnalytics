@@ -19,6 +19,8 @@ This introductory chapter provides the reader an introduction to R and Python as
 library(tidyverse)
 library(kableExtra)
 library(nflfastR)
+library(patchwork)
+library(tidymodels)
 ```
 
 We can load *play-by-play* data using the `load_pbp()` function from this package. I'll load the data from the 2021 season, as shown in the textbook.
@@ -393,12 +395,287 @@ pbp_16_21 %>%
 
 ## Chapter 3: Linear Regression and Rushing Yards Over Expected
 
+We'll continue with the 2016 - 2021 play-by-play data in this chapter. Here, however, we'll focus on rushing yards. The main ideas presented are quite interesting -- basically, not all rushes are created equally. If a rusher gains 6 yards, when 8 are needed, then they did not achieve their objective. However, if a rusher gains 2 yards on a 3rd and 1, then that rusher has done their job and the play was successful. We need ways to assess the quality of a play, while controlling for the current game conditions -- for example, down and yards to go.
 
+Let's start by looking at the relationship between yards to gain (yards to a first down or touchdown) and the rushing yards gained on a running play.
 
+```{r}
+pbp_16_21 %>%
+  count(play_type)
 
+p1 <- pbp_16_21 %>%
+  filter(play_type == "run") %>%
+  ggplot() + 
+  geom_point(aes(x = ydstogo, y = rushing_yards), alpha = 0.25) + 
+  geom_smooth(aes(x = ydstogo, y = rushing_yards), method = "lm") + 
+  labs(title = "Rushing Yards Gained versus Yards to Go",
+       x = "Yards to Go",
+       y = "Rushing Yards Gained")
 
+p2 <- pbp_16_21 %>%
+  filter(play_type == "run") %>%
+  ggplot() + 
+  geom_boxplot(aes(x = ydstogo, y = rushing_yards, group = ydstogo)) + 
+  geom_smooth(aes(x = ydstogo, y = rushing_yards), method = "lm") + 
+  labs(title = "Rushing Yards Gained versus Yards to Go",
+       x = "Yards to Go",
+       y = "Rushing Yards Gained")
 
+p1 + p2
+```
 
+This is really noisy data. Let's see if we can get some better insight by averaging the number of rushing yards gained at each yards-to-go threshold.
+
+```{r}
+pbp_16_21 %>%
+  filter(play_type == "run") %>%
+  group_by(ydstogo) %>%
+  summarize(avg_rush_gain = mean(rushing_yards)) %>%
+  ggplot() + 
+  geom_point(aes(x = ydstogo, y = avg_rush_gain)) + 
+  geom_smooth(aes(x = ydstogo, y = avg_rush_gain), method = "lm") + 
+  labs(title = "Average Rush Yards Gained by Yards to Go",
+       x = "Yards to Go",
+       y = "Average Rushing Yards Gained")
+```
+
+Let's build and analyse a simple linear regression model to predict rushing yards gained, by the current yards to go.
+
+```{r}
+lin_reg_spec <- linear_reg() %>%
+  set_engine("lm")
+
+lin_reg_rec <- recipe(rushing_yards ~ ydstogo, data = pbp_16_21)
+
+lin_reg_wf <- workflow() %>%
+  add_model(lin_reg_spec) %>%
+  add_recipe(lin_reg_rec)
+
+lin_reg_fit <- lin_reg_wf %>%
+  fit(pbp_16_21)
+```
+
+Now that we have a fitted model, we can see the global model utility metrics below.
+
+```{r}
+lin_reg_fit %>%
+  glance() %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("hover", "striped"))
+```
+
+Similarly, we can see the statistical measures on the individual model terms below as well.
+
+```{r}
+lin_reg_fit %>%
+  extract_fit_engine() %>%
+  tidy()
+```
+
+We can now use our model to obtain residuals and explore Rushing Yards Over Expected (RYOE).
+
+```{r}
+lin_reg_fit %>%
+  augment(
+    pbp_16_21 %>%
+      filter(play_type == "run") %>%
+      select(rusher, ydstogo, rushing_yards)
+  ) %>%
+  mutate(RYOE = .pred - rushing_yards) %>%
+  ggplot() + 
+  geom_point(aes(x = ydstogo, y = RYOE)) + 
+  geom_text(aes(x = ydstogo, y = RYOE, label = ifelse(RYOE > quantile(RYOE, 0.9999, na.rm = TRUE), rusher, ""))) + 
+  ylim(c(0, 40)) +
+  labs(title = "Most Successful Rushes",
+       x = "Yards to Gain",
+       y = "Rushing Yards Over Expected")
+```
+
+Notice that those rushes which are longer than expected seemed to occur on yardages typically thought of as throwing situations. These were relatively long-yardage scenarios.
+
+Let's dive deeper into RYOE, and understand which players had the highest average RYOE in each season. We'll then determine the stability of the RYOE metric from one year to the next, similarly to the way we determined the stability of passing yards on short- and long- passes in the previous chapter.
+
+```{r}
+lin_reg_fit %>%
+  augment(
+    pbp_16_21 %>%
+      filter(play_type == "run", !is.na(rusher)) %>%
+      select(rusher_id, rusher, season, ydstogo, rushing_yards) %>%
+      mutate(rushing_yards = ifelse(is.na(rushing_yards), 0, rushing_yards)) 
+    ) %>%
+  rename(expected_yards = .pred) %>%
+  mutate(ryoe = rushing_yards - expected_yards) %>%
+  group_by(rusher_id, rusher, season) %>%
+  summarize(
+    runs = n(),
+    avg_ryoe = mean(ryoe),
+    avg_rush_yards = mean(rushing_yards),
+    total_ryoe = sum(ryoe),
+    total_rush_yards = sum(rushing_yards),
+    .groups = "drop"
+  ) %>%
+  filter(runs >= 50) %>%
+  arrange(-avg_ryoe) %>%
+  head(n = 20) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("hover", "striped"))
+```
+
+As in the textbook, we see several Quarterbacks at the top of the list. In particular, Lamar Jackson had several great seasons, as measured by RYOE. This is part of what led to him being given an enormous contract in 2023.
+
+If we arrange rushers by `total_ryoe` rather than `avg_ryoe`, we see the following results.
+
+```{r}
+lin_reg_fit %>%
+  augment(
+    pbp_16_21 %>%
+      filter(play_type == "run", !is.na(rusher)) %>%
+      select(rusher_id, rusher, season, ydstogo, rushing_yards) %>%
+      mutate(rushing_yards = ifelse(is.na(rushing_yards), 0, rushing_yards)) 
+    ) %>%
+  rename(expected_yards = .pred) %>%
+  mutate(ryoe = rushing_yards - expected_yards) %>%
+  group_by(rusher_id, rusher, season) %>%
+  summarize(
+    runs = n(),
+    avg_ryoe = mean(ryoe),
+    avg_rush_yards = mean(rushing_yards),
+    total_ryoe = sum(ryoe),
+    total_rush_yards = sum(rushing_yards),
+    .groups = "drop"
+  ) %>%
+  filter(runs >= 50) %>%
+  arrange(-total_ryoe) %>%
+  head(n = 20) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("hover", "striped"))
+```
+
+Again, like the text, we see Jonathan Taylor and Derrick Henry topping this list.
+
+Now let's see whether `avg_ryoe` and `total_ryoe` are stable metrics from one year to the next.
+
+```{r}
+rush_stats_16_21 <- lin_reg_fit %>%
+  augment(
+    pbp_16_21 %>%
+      filter(play_type == "run", !is.na(rusher)) %>%
+      select(rusher_id, rusher, season, ydstogo, rushing_yards) %>%
+      mutate(rushing_yards = ifelse(is.na(rushing_yards), 0, rushing_yards)) 
+    ) %>%
+  rename(expected_yards = .pred) %>%
+  mutate(ryoe = rushing_yards - expected_yards) %>%
+  group_by(rusher_id, rusher, season) %>%
+  summarize(
+    runs = n(),
+    avg_ryoe = mean(ryoe),
+    avg_rush_yards = mean(rushing_yards),
+    total_ryoe = sum(ryoe),
+    total_rush_yards = sum(rushing_yards),
+    .groups = "drop"
+  ) %>%
+  filter(runs > 50) %>%
+  mutate(next_season = season + 1) %>%
+  select(rusher_id, rusher, season, next_season, runs, avg_ryoe, 
+         avg_rush_yards, total_ryoe, total_rush_yards)
+
+rush_stats_16_21 %>%
+  select(-season) %>%
+  inner_join(
+    rush_stats_16_21 %>%
+      select(-next_season),
+    by = c("rusher_id" = "rusher_id", "rusher" = "rusher", "next_season" = "season")
+    ) %>%
+    summarize(
+      rushes = cor(runs.x, runs.y),
+      avg_ryoe = cor(avg_ryoe.x, avg_ryoe.y),
+      avg_rush_yds = cor(avg_rush_yards.x, avg_rush_yards.y),
+      total_ryoe = cor(total_ryoe.x, total_ryoe.y),
+      total_rush_yds = cor(total_rush_yards.x, total_rush_yards.y)
+    ) %>%
+  pivot_longer(cols = everything(), names_to = "metric", values_to = "y2y_correlation") %>%
+  arrange(-y2y_correlation) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("hover", "striped"))
+```
+
+Notice that `total_rush_yds`, and `total_ryoe` are difficult to interpret because volume is a masked variable in both of these measures. These metrics actually measure two things -- the frequency of run attempts and the length of each run. We aren't reproducing the exact numbers from the textbook here. I'm wondering if that is due to stat updates, or if my code is not identical to the code found in the text.
+
+### Exercises
+
+1. What happens if you repeat the correlation analysis, but use 100 rushes per season as the threshold rather than 50? Are the takeaways regarding stability the same?
+
+```{r}
+rush_stats_16_21 <- lin_reg_fit %>%
+  augment(
+    pbp_16_21 %>%
+      filter(play_type == "run", !is.na(rusher)) %>%
+      select(rusher_id, rusher, season, ydstogo, rushing_yards) %>%
+      mutate(rushing_yards = ifelse(is.na(rushing_yards), 0, rushing_yards)) 
+    ) %>%
+  rename(expected_yards = .pred) %>%
+  mutate(ryoe = rushing_yards - expected_yards) %>%
+  group_by(rusher_id, rusher, season) %>%
+  summarize(
+    runs = n(),
+    avg_ryoe = mean(ryoe),
+    avg_rush_yards = mean(rushing_yards),
+    total_ryoe = sum(ryoe),
+    total_rush_yards = sum(rushing_yards),
+    .groups = "drop"
+  ) %>%
+  filter(runs > 100) %>%
+  mutate(next_season = season + 1) %>%
+  select(rusher_id, rusher, season, next_season, runs, avg_ryoe, 
+         avg_rush_yards, total_ryoe, total_rush_yards)
+
+rush_stats_16_21 %>%
+  select(-season) %>%
+  inner_join(
+    rush_stats_16_21 %>%
+      select(-next_season),
+    by = c("rusher_id" = "rusher_id", "rusher" = "rusher", "next_season" = "season")
+    ) %>%
+    summarize(
+      rushes = cor(runs.x, runs.y),
+      avg_ryoe = cor(avg_ryoe.x, avg_ryoe.y),
+      avg_rush_yds = cor(avg_rush_yards.x, avg_rush_yards.y),
+      total_ryoe = cor(total_ryoe.x, total_ryoe.y),
+      total_rush_yds = cor(total_rush_yards.x, total_rush_yards.y)
+    ) %>%
+  pivot_longer(cols = everything(), names_to = "metric", values_to = "y2y_correlation") %>%
+  arrange(-y2y_correlation) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("hover", "striped"))
+```
+
+> We do see that `avg_ryoe` is still a more stable measure than `avg_rush_yds` from one year to the next. The different in correlations is similar -- about $0.016$ versus $0.013$ -- although, this is about a 23% increase in the difference. Interestingly, we see that the correlation between total runs and total rush yards from year to year has dropped significantly. This indicates that dominant rushers (rushers getting lots of carries) don't generally hold over from one year to the next. This could be due to wear and tear on the position.
+
+2. Assume that all of Mike Alstott's carries were on 3rd and 1 situations, while all Warrick Dunn's carries were on 1st and 10s. Is situation alone enough to explain the difference between the yards per carry for these two players (3.7 yards per carry versus 4.0 yards per carry)?
+
+```{r}
+lin_reg_fit %>%
+  extract_fit_engine() %>%
+  tidy() %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("hover", "striped"))
+```
+
+> Notice that the coefficient on yards to go in the regression model is about 0.113. If we multiply this by 9 (the difference in the assumed yards to go measures), we expect a difference of about a full yard (in terms of expected rushing yards). This would be more than enough to explain the difference in yards per carry for these two backs.
+
+3. What happens if you repeat the analyses in the chapter with yards to the endzone (`yard_line_100`) rather than yards to gain?
+
+> I'm omitting this for now, but it should be simple to do.
+
+4. Conduct an analysis analogous to the one in this chapter, but for receivers and the passing game.
+
+> Again, I'm omitting for now, but it should be easy to conduct.
+
+## Chapter 4: Multiple Linear Regression and Rushing Yards Over Expected, Revisited
+
+In Chapter 3, we controlled for just a single variable. However, the result of a rushing play is almost surely to depend on more than simply the *yards to gain*. For example, A 2nd and 1 is a very different play than a 4th and 1. In the former, the defense may expect a long passing play and needs to defend against that, while in the latter, it is much more likely that the offense will simply try to reach the line to gain and so defenses in these situations are defending primarily against short plays.
+
+In this chapter, we'll build our regression model to control for more gameplay scenarios.
 
 
 
