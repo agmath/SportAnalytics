@@ -677,5 +677,181 @@ In Chapter 3, we controlled for just a single variable. However, the result of a
 
 In this chapter, we'll build our regression model to control for more gameplay scenarios.
 
+```{r}
+pbp_16_22 <- load_pbp(2016:2022)
+
+pbp_run <- pbp_16_22 %>%
+  filter((play_type == "run") & (!is.na(rusher_id)) & (!is.na(down)) & (!is.na(run_location))) %>%
+  mutate(
+    rushing_yards = ifelse(is.na(rushing_yards), 0, rushing_yards)
+  )
+
+pbp_run %>%
+  ggplot() + 
+  geom_density(aes(x = rushing_yards, fill = run_location)) +
+  facet_grid(down ~ run_location) + 
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+```{r}
+p_all_runs <- pbp_run %>%
+  ggplot() + 
+  geom_boxplot(aes(x = down, y = rushing_yards, group = down))
+
+p_ten_to_run <- pbp_run %>%
+  filter(ydstogo == 10) %>%
+  ggplot() + 
+  geom_boxplot(aes(x = down, y = rushing_yards, group = down))
+
+p_all_runs + p_ten_to_run
+```
+
+Let's plot rushing yards gained against the starting yard line for the play.
+
+```{r}
+pbp_run %>%
+  ggplot() + 
+  geom_point(aes(x = yardline_100, y = rushing_yards), alpha = 0.2) + 
+  geom_smooth(aes(x = yardline_100, y = rushing_yards))
+```
+
+Let's bin and average to gain better insight.
+
+```{r}
+pbp_run %>%
+  group_by(yardline_100) %>%
+  summarize(
+    avg_rush_yds = mean(rushing_yards)
+  ) %>%
+  ggplot() + 
+  geom_point(aes(x = yardline_100, y = avg_rush_yds))
+```
+
+Seems like there is an association here. Let's plot score differential and rushing yards.
+
+```{r}
+pbp_run %>%
+  group_by(score_differential) %>%
+  summarize(
+    avg_rush_yds = mean(rushing_yards)
+  ) %>%
+  ggplot() + 
+  geom_point(aes(x = score_differential, y = avg_rush_yds)) + 
+  geom_smooth(aes(x = score_differential, y = avg_rush_yds),
+              method = "lm")
+```
+
+Okay, let's build a multiple linear regression model to predict rushing yards. We'll include `down`, `ydstogo`, an interaction between those variables, `yardline_100`, `run_location`, and `score_differential`.
+
+```{r}
+lin_reg_spec <- linear_reg() %>%
+  set_engine("lm") %>%
+  set_mode("regression")
+
+lin_reg_rec <- recipe(rushing_yards ~ down + ydstogo + yardline_100 + run_location + score_differential, data = pbp_run) %>%
+  step_mutate(down = as.factor(down)) %>%
+  step_dummy(down) %>%
+  step_interact(~starts_with("down"):ydstogo)
+
+lin_reg_wf <- workflow() %>%
+  add_model(lin_reg_spec) %>%
+  add_recipe(lin_reg_rec)
+
+lin_reg_fit <- lin_reg_wf %>%
+  fit(pbp_run)
+
+lin_reg_fit %>%
+  extract_fit_engine() %>%
+  tidy()
+```
+
+Now that we have out model, we can compute the *rushing yards over expected* (residual) for each play.
+
+```{r}
+lin_reg_fit %>%
+  augment(pbp_run) %>%
+  mutate(ryoe = rushing_yards - .pred) %>%
+  arrange(-ryoe)
+```
+
+Let's calculate RYOE by season, for each rusher.
+
+```{r}
+lin_reg_fit %>%
+  augment(pbp_run) %>%
+  mutate(ryoe = rushing_yards - .pred) %>%
+  group_by(season, rusher_id, rusher) %>%
+  summarize(
+    total_rushes = n(),
+    avg_rush_yds = mean(rushing_yards),
+    avg_ryoe = mean(ryoe),
+    total_rush_yds = sum(rushing_yards),
+    total_ryoe = sum(ryoe),
+    .groups = "drop"
+    ) %>%
+  filter(total_rushes > 50) %>%
+  arrange(-avg_ryoe)
+```
+
+We can now try calculating the stability of average and total rushing yards as well as the stability of average and total ryoe.
+
+```{r}
+lin_reg_fit %>%
+  augment(pbp_run) %>%
+  mutate(ryoe = rushing_yards - .pred) %>%
+  group_by(season, rusher_id, rusher) %>%
+  summarize(
+    total_rushes = n(),
+    avg_rush_yds = mean(rushing_yards),
+    avg_ryoe = mean(ryoe),
+    total_rush_yds = sum(rushing_yards),
+    total_ryoe = sum(ryoe),
+    .groups = "drop"
+    ) %>%
+  filter(total_rushes > 50) %>%
+  group_by(rusher_id, rusher) %>%
+  mutate(
+    next_total_rushes = lead(total_rushes),
+    next_avg_rush_yds = lead(avg_rush_yds),
+    next_avg_ryoe = lead(avg_ryoe),
+    next_total_rush_yds = lead(total_rush_yds),
+    next_total_ryoe = lead(total_ryoe)
+  ) %>%
+  ungroup() %>%
+  filter(!is.na(next_total_rushes)) %>%
+  summarize(
+    cor_total_rushes = cor(total_rushes, next_total_rushes),
+    cor_avg_rush_yards = cor(avg_rush_yds, next_avg_rush_yds),
+    cor_avg_ryoe = cor(avg_ryoe, next_avg_ryoe),
+    cor_total_rush_yds = cor(total_rush_yds, next_total_rush_yds),
+    cor_total_ryoe = cor(total_ryoe, next_total_ryoe)
+  )
+```
+
+We can see that average ryoe is slightly more stable that average rushing yards.
+
+The remainder of the chapter goes into model assessment techniques. They look at residuals versus fitted values, the Q-Q plot, a scale-location plot, and the leverage plot (these are the four plots produced when you use `plot()` on a model). The authors advocate that looking at these plots can help us identify significant limitations about out model. For example, the model here fit quite poorly for runs less than 15 yards and runs over 95 yards. They filtered these observations out and then re-fit the model. 
+
+:::{.callout-note}
+I wonder how useful this is though, because you are eliminating most runs from the data used to fit the model.
+:::
+
+### Exercises
+
+1. Change the *carries* threshold from 50 to 100 for the calculations of the stability measures (correlation) for each of the rusher performance summary statistics. Do we still see the same stability differences?
+2. Us the full `nflfastR` dataset to show that rushing is less efficient than passing, both using yards per play and EPA (expected points added) per play. Also inspect the variability of these two play types.
+3. Is rushing more valuable than passing in some situations? For example in late-down and short yardage situations, or plays near the opponent's goal line.
+4. Inspect James Conner's RYOE values for his career relative to Le`Veon Bell's. What do you notice about the metric for both backs?
+5. Repeat everything in this chapter for passing plays instead of running plays. You may want to use different features in the model (for example, `run_location` is not meaningful for passing plays).
+
+## Chapter 5: GLMs and Completion Percentage Over Expected (CPOE)
+
+
+
+
+
+
+
 
 
