@@ -847,7 +847,235 @@ I wonder how useful this is though, because you are eliminating most runs from t
 
 ## Chapter 5: GLMs and Completion Percentage Over Expected (CPOE)
 
+```{r}
+rm(list = ls())
+```
 
+```{r}
+pbp_16_22 <- load_pbp(2016:2022)
+
+pbp_pass <- pbp_16_22 %>%
+  filter((play_type == "pass") & (!is.na(passer_id)) & (!is.na(air_yards)))
+
+p1 <- pbp_pass %>%
+  group_by(air_yards) %>%
+  summarize(
+    completion_pct = mean(complete_pass)
+    ) %>%
+  ggplot(aes(x = air_yards, y = completion_pct)) + 
+  geom_point() + 
+  geom_smooth(method = "lm") + 
+  labs(
+    title = "All Pass Lengths"
+  )
+
+p2 <- pbp_pass %>%
+  filter(between(air_yards, 0, 30)) %>%
+  group_by(air_yards) %>%
+  summarize(
+    completion_pct = mean(complete_pass)
+    ) %>%
+  ggplot(aes(x = air_yards, y = completion_pct)) + 
+  geom_point() + 
+  geom_smooth(method = "lm") + 
+  labs(
+    title = "Passes Between 0 and 30 Yards"
+  )
+
+p1 + p2  
+```
+
+We'll build a simple logistic regression model for expected completion percentage, just using `air_yards` as the sole predictor.
+
+```{r}
+log_reg_spec <- logistic_reg() %>%
+  set_engine("glm") %>%
+  set_mode("classification")
+
+log_reg_rec <- recipe(complete_pass ~ air_yards, data = pbp_pass) %>%
+  step_mutate(complete_pass = as.factor(complete_pass))
+
+log_reg_wf <- workflow() %>%
+  add_model(log_reg_spec) %>%
+  add_recipe(log_reg_rec)
+
+log_reg_fit <- log_reg_wf %>%
+  fit(pbp_pass)
+
+log_reg_fit %>%
+  glance()
+```
+
+```{r}
+log_reg_fit %>%
+  extract_fit_engine() %>%
+  tidy()
+```
+
+```{r}
+log_reg_fit %>%
+  augment(pbp_pass) %>%
+  mutate(cpoe = complete_pass - .pred_1) %>%
+  group_by(season, passer_id, passer) %>%
+  summarize(
+    total_passes = n(),
+    avg_pass_length = mean(air_yards),
+    avg_cpoe = mean(cpoe),
+    .groups = "drop") %>%
+  filter(total_passes > 100) %>%
+  arrange(-avg_cpoe) 
+```
+
+Let's build a model that can adjust for more complex game scenarios. We'll include `down` (as a factor), yards to go for a first down (`ydstogo`), the `yardline_100`, the `pass_location`, and `qb_hit`. We'll also include an interaction between `down` and `ydstogo`.
+
+```{r}
+log_reg_rec <- recipe(complete_pass ~ air_yards + down + ydstogo + yardline_100 + pass_location + qb_hit, data = pbp_pass) %>%
+  step_mutate(complete_pass = as.factor(complete_pass)) %>%
+  step_mutate(down = as.factor(down)) %>%
+  step_mutate(qb_hit = as.factor(qb_hit)) %>%
+  step_unknown(all_nominal_predictors()) %>%
+  step_novel(all_nominal_predictors()) %>%
+  step_other(all_nominal_predictors()) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_interact(~starts_with("down"):ydstogo)
+
+log_reg_wf <- workflow() %>%
+  add_model(log_reg_spec) %>%
+  add_recipe(log_reg_rec)
+
+log_reg_fit <- log_reg_wf %>%
+  fit(pbp_pass)
+```
+
+```{r}
+log_reg_fit %>%
+  glance()
+```
+
+```{r}
+log_reg_fit %>%
+  extract_fit_engine() %>%
+  tidy()
+```
+
+Let's re-run our analysis on CPOE, but with this model adjusting for more game scenarios.
+
+```{r}
+log_reg_fit %>%
+  augment(pbp_pass) %>%
+  mutate(cpoe = complete_pass - .pred_1) %>%
+  group_by(season, passer_id, passer) %>%
+  summarize(
+    total_passes = n(),
+    avg_pass_length = mean(air_yards),
+    avg_cpoe = mean(cpoe),
+    completion_pct = mean(complete_pass),
+    .groups = "drop") %>%
+  filter(total_passes > 100) %>%
+  arrange(-avg_cpoe) 
+```
+
+Let's investigate the stability of CPOE versus completion percentage.
+
+```{r}
+log_reg_fit %>%
+  augment(pbp_pass) %>%
+  mutate(cpoe = complete_pass - .pred_1) %>%
+  group_by(season, passer_id, passer) %>%
+  summarize(
+    total_passes = n(),
+    avg_pass_length = mean(air_yards),
+    avg_cpoe = mean(cpoe),
+    completion_pct = mean(complete_pass),
+    .groups = "drop") %>%
+  filter(total_passes > 100) %>%
+  group_by(passer_id, passer) %>%
+  arrange(season) %>%
+  mutate(
+    next_total_passes = lead(total_passes),
+    next_cpoe = lead(avg_cpoe),
+    next_completion_pct = lead(completion_pct)
+  ) %>%
+  ungroup() %>%
+  filter(!is.na(next_total_passes)) %>%
+  summarize(
+    cor_total_passes = cor(total_passes, next_total_passes),
+    cor_completion_pct = cor(completion_pct, next_completion_pct),
+    cor_cpoe = cor(avg_cpoe, next_cpoe)
+  )
+```
+
+Note that the numbers above don't exactly match the numbers suggested by the book. Completion percentage has a correlation of about 0.446 and CPOE has a correlation of about 0.465. Maybe because of how I'm treating novel categories? It also could be that they are using joins and I'm not. The result of my calculation ignores the possibility of a passer getting injured or benched during a season and not meeting my pass requirement threshold. I'll try the join approach from the book below.
+
+```{r}
+log_reg_fit %>%
+  augment(pbp_pass) %>%
+  mutate(cpoe = complete_pass - .pred_1) %>%
+  group_by(season, passer_id, passer) %>%
+  summarize(
+    total_passes = n(),
+    avg_pass_length = mean(air_yards),
+    avg_cpoe = mean(cpoe),
+    completion_pct = mean(complete_pass),
+    exp_completion_pct = mean(.pred_1),
+    .groups = "drop") %>%
+  filter(total_passes > 100) %>%
+  group_by(passer_id, passer) %>%
+  arrange(season) %>%
+  mutate(
+    next_season = lead(season),
+    next_total_passes = lead(total_passes),
+    next_cpoe = lead(avg_cpoe),
+    next_completion_pct = lead(completion_pct),
+    next_exp_completion_pct = lead(exp_completion_pct)
+    ) %>%
+  filter(next_season == season + 1) %>%
+  ungroup() %>%
+  filter(!is.na(next_total_passes)) %>%
+  summarize(
+    cor_total_passes = cor(total_passes, next_total_passes),
+    cor_completion_pct = cor(completion_pct, next_completion_pct),
+    cor_cpoe = cor(avg_cpoe, next_cpoe),
+    cor_exp_completion_pct = cor(exp_completion_pct, next_exp_completion_pct)
+  )
+```
+
+That's better. There are some things to note about this analysis, however. Some of the features and feature combinations included in the model could be associated with the Quarterback though. That is, the model may inadvertently account for differences in Quarterback quality, which then confounds our understanding of CPOE. We see that the correlation in expected completion percentage is higher than either completion percentage or CPOE, indicating that Quarterback play is relatively stable year-over-year.
+
+### Discussion on Odds
+
+```{r}
+log_reg_fit %>% 
+  extract_fit_engine() %>%
+  tidy() %>%
+  mutate(
+    lower_odds = exp(estimate - (2*std.error)),
+    odds = exp(estimate),
+    upper_odds = exp(estimate + (2*std.error))
+    )
+```
+
+From the tabular output above, we can see that passes to the middle of the field are about 1.21 times more likely to be completed than passes to the left or right sidelines. Similarly, each additional yard to go decreases the baseline (intercept) odds of completion by a factor of about 0.9443. For example, the baseline (intercept) odds for a pass with a single yard to go is about $2.0506\cdot 0.9443$, or 1.936, which a pass with nine yards to go has completion odds of about $2.0506\times \left(0.9442^9\right)$, or 1.224.
+
+For any singular pass, we can also calculate the expected odds of completion. This can be useful for evaluating real-time game scenarios and play-calling.
+
+```{r}
+log_reg_fit %>% 
+  augment(pbp_pass) %>%
+  mutate(
+    odds = .pred_1 / (1 - .pred_1)
+  ) %>%
+  select(down, ydstogo, yardline_100, air_yards, qb_hit, odds)
+```
+
+### Exercises
+
+1. Reproduce this analysis without the `qb_hit` feature. How does it change the leaderboard and what can we take away?
+2. What other features could/should be added to our logistic regression? How do these adjustments change the stability estimates.
+3. Try the analysis for receivers instead of Quarterbacks -- does anything interesting emerge?
+4. Try is again for defensive positions.
+
+## Chapter 6: Poisson Regression and Passing Touchdowns
 
 
 
