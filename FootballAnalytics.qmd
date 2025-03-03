@@ -1077,9 +1077,404 @@ log_reg_fit %>%
 
 ## Chapter 6: Poisson Regression and Passing Touchdowns
 
+In this chapter, we focus on *prop* betting and using Poisson regression to model the over/under on number of touchdown passes by a quarterback in a game. The chapter began with an introduction to sports betting -- the three main types being *spread*, *total* (over/under combined point total), and *moneyline*. Prop bets are the least expensive for buy-in and are the most abundant, given the sports-betting apps available today.
 
+Let's start by investigating the distribution of touchdown passes by starting quarterbacks.
 
+```{r}
+library(tidyverse)
+library(kableExtra)
+library(nflfastR)
+library(patchwork)
+library(tidymodels)
+library(poissonreg)
 
+rm(list = ls())
+
+pbp_16_22 <- load_pbp(2016:2022)
+pbp_pass <- pbp_16_22 %>%
+  filter(play_type == "pass", !is.na(passer_id))
+
+pbp_pass %>%
+  group_by(season, week, passer_id, passer) %>%
+  summarize(
+    total_passes = n(),
+    total_tds = sum(touchdown),
+    .groups = "drop"
+  ) %>%
+  filter(total_passes >= 10) %>%
+  ggplot(aes(x = total_tds)) + 
+  geom_bar(color = "black", fill = "purple") + 
+  geom_vline(aes(xintercept = mean(total_tds)), lwd = 1.25, linetype = "dashed")
+
+# pbp_pass %>%
+#   group_by(season, week, passer_id, passer) %>%
+#   summarize(
+#     total_passes = n(),
+#     total_tds = sum(touchdown),
+#     .groups = "drop"
+#   ) %>%
+#   filter(total_passes >= 10) %>%
+#   summarize(mean(total_tds))
+```
+
+This looks like Poisson, with $\lambda = 1.57$ (`mean(total_tds)`). 
+
+```{r}
+my_sim_pois <- rpois(5000, lambda = 1.57)
+my_sim_pois_freqs <- tibble(my_sim_pois = my_sim_pois) %>%
+  count(my_sim_pois) %>%
+  mutate(rel_freq = n/sum(n))
+
+p1 <- pbp_pass %>%
+  group_by(season, week, passer_id, passer) %>%
+  summarize(
+    total_passes = n(),
+    total_tds = sum(pass_touchdown),
+    avg_line = mean(total_line),
+    .groups = "drop"
+  ) %>%
+  filter(total_passes > 10) %>%
+  ggplot(aes(x = total_tds)) + 
+  geom_bar(aes(y = after_stat(prop)), color = "black", fill = "purple") + 
+  geom_line(data = my_sim_pois_freqs,
+            aes(x = my_sim_pois, y = rel_freq),
+            lwd = 1.25,
+            linetype = "dashed")
+
+p2 <- ggplot() + 
+  geom_bar(aes(x = my_sim_pois, y = after_stat(prop)),
+                 color = "black", fill = "darkgreen")
+
+p1 / p2
+```
+
+They look pretty similar to me! I'll save out our weekly touchdown counts by quarterback since we'll use it throughout the remainder here.
+
+```{r}
+weekly_td_count <- pbp_pass %>%
+  group_by(season, week, passer_id, passer) %>%
+  summarize(
+    total_passes = n(),
+    total_pass_tds = sum(pass_touchdown),
+    avg_line = mean(total_line),
+    .groups = "drop"
+  ) %>%
+  filter(total_passes > 10)
+```
+
+We're going to build a model that includes the average prior per-game touchdowns up to that season and week. Notice that the textbook limits the calculations to include only the previous season and completed games from the current season. This seems appropriate, and I think I would need a loop for this purpose. I suppose I could always use a join instead to join the previous season average, per-game passing touchdowns as a new column. It's not important for now, and I'll return to this later.
+
+```{r}
+season_td_avgs <- weekly_td_count %>%
+  group_by(passer_id, passer, season) %>%
+  summarize(
+    avg_tds = mean(total_pass_tds),
+    .groups = "drop"
+  ) %>%
+  group_by(passer_id, passer) %>%
+  mutate(
+    last_season_avg_tds = lag(avg_tds, default = 0)
+  )
+
+weekly_td_count %>%
+  left_join(
+    season_td_avgs %>% select(-avg_tds)
+  ) %>%
+  group_by(passer_id, passer) %>%
+  arrange(season, week) %>%
+  mutate(
+    total_games = row_number(),
+    cum_total_pass_tds = cumsum(total_pass_tds),
+    cum_avg_pass_tds = (18*last_season_avg_tds + week*cummean(total_pass_tds))/(18 + week)
+  )
+```
+
+Let's plot the results.
+
+```{r}
+weekly_td_count %>%
+  left_join(
+    season_td_avgs %>% select(-avg_tds)
+  ) %>%
+  group_by(passer_id, passer) %>%
+  arrange(season, week) %>%
+  mutate(
+    total_games = row_number(),
+    cum_total_pass_tds = cumsum(total_pass_tds),
+    cum_avg_pass_tds = (18*last_season_avg_tds + week*cummean(total_pass_tds))/(18 + week)
+  ) %>%
+  ggplot(aes(x = week, y = cum_avg_pass_tds, color = passer_id)) +
+  geom_line(alpha = 0.2) +
+  facet_wrap(~season) + 
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+We can add a Poisson regression line as follows.
+
+```{r}
+#| warning: false
+#| message: false
+
+weekly_td_count %>%
+  left_join(
+    season_td_avgs %>% select(-avg_tds)
+  ) %>%
+  group_by(passer_id, passer) %>%
+  arrange(season, week) %>%
+  mutate(
+    total_games = row_number(),
+    cum_total_pass_tds = cumsum(total_pass_tds),
+    cum_avg_pass_tds = (18*last_season_avg_tds + week*cummean(total_pass_tds))/(18 + week)
+  ) %>%
+  ggplot(aes(x = week, y = cum_avg_pass_tds)) +
+  geom_line(aes(color = passer_id), alpha = 0.2) +
+  geom_smooth(method = "glm", method.args = list("family" = "poisson")) + 
+  facet_wrap(~season) + 
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+Let's fit a Poisson Regression model.
+
+```{r}
+weekly_td_for_model <- weekly_td_count %>%
+  left_join(
+    season_td_avgs %>% select(-avg_tds)
+  ) %>%
+  group_by(passer_id, passer) %>%
+  arrange(season, week) %>%
+  mutate(
+    total_games = row_number(),
+    cum_total_pass_tds = cumsum(total_pass_tds),
+    cum_avg_pass_tds = (18*last_season_avg_tds + week*cummean(total_pass_tds))/(18 + week),
+    incoming_avg_pass_tds = lag(cum_avg_pass_tds)
+  ) %>%
+  ungroup()
+
+pois_reg_spec <- poisson_reg() %>%
+  set_engine("glm") %>%
+  set_mode("regression")
+
+pois_reg_rec <- recipe(total_pass_tds ~ cum_avg_pass_tds + avg_line, data = weekly_td_for_model)
+
+pois_reg_wf <- workflow() %>%
+  add_model(pois_reg_spec) %>%
+  add_recipe(pois_reg_rec)
+
+pois_reg_fit <- pois_reg_wf %>%
+  fit(weekly_td_for_model)
+
+pois_reg_fit %>%
+  extract_fit_parsnip() %>%
+  tidy()
+```
+
+### Replicating the Book
+
+```{r}
+pbp <- load_pbp(2016:2022)
+pbp_pass <- pbp %>%
+  filter(!is.na(passer_id))
+
+pbp_pass_td <- pbp_pass %>%
+  mutate(
+    pass_touchdown = ifelse(is.na(pass_touchdown), 0, pass_touchdown)
+  ) %>%
+  group_by(season, week, passer_id, passer) %>%
+  summarize(
+    n_passes = n(),
+    total_pass_td = sum(pass_touchdown),
+    total_line = mean(total_line),
+    .groups = "drop"
+  ) %>%
+  filter(n_passes >= 10)
+
+pbp_pass_td %>%
+  count(total_pass_td)
+
+results_df <- tibble()
+
+for(season_idx in 2017:2022){
+  for(week_idx in 1:22){
+    week_calc <- pbp_pass_td %>%
+      filter((season == (season_idx - 1)) | ((season == season_idx) & (week < week_idx))) %>%
+      group_by(passer_id, passer) %>%
+      summarize(
+        n_games = n(),
+        avg_pass_td = mean(total_pass_td),
+        .groups = "keep") %>%
+      mutate(
+        season = season_idx,
+        week = week_idx
+      )
+    results_df <- bind_rows(results_df, week_calc)
+  }
+}
+
+results_df %>%
+  filter(passer == "P.Mahomes") %>%
+  tail()
+
+pbp_pass_td_model <- pbp_pass_td %>%
+  inner_join(
+    results_df
+  )
+```
+
+```{r}
+pois_reg_spec <- poisson_reg() %>%
+  set_engine("glm") %>%
+  set_mode("regression")
+
+pois_reg_rec <- recipe(total_pass_td ~ avg_pass_td + total_line, data = pbp_pass_td_model)
+
+pois_reg_wf <- workflow() %>%
+  add_model(pois_reg_spec) %>%
+  add_recipe(pois_reg_rec)
+
+pois_reg_fit <- pois_reg_wf %>%
+  fit(pbp_pass_td_model)
+
+pois_reg_fit %>%
+  extract_fit_parsnip() %>%
+  tidy()
+```
+
+Now that I've got the same mode from the text, I'll move forward with interpretations of the model coefficients. Note that the Poisson regression model coefficients are on an exponential scale.
+
+```{r}
+pois_reg_fit %>%
+  extract_fit_parsnip() %>%
+  tidy() %>%
+  mutate(
+    exp_lower = exp(estimate - 2*std.error),
+    exp_estimate = exp(estimate),
+    exp_upper = exp(estimate + 2*std.error)
+  )
+```
+
++ For each touchdown in the player's historical per-game average, we can multiply by about 1.36 to get the expected number of touchdown passes
++ The `total_line` is quite efficient (only being off by about 2%), we multiply the line by about 1.02.
+
+We can use the model to make a prediction for Patrick Mahomes' superbowl LVIII against the Eagles.
+
+```{r}
+pois_reg_fit %>% augment(
+  pbp_pass_td_model %>%
+    filter(season == 2022, week == 22, passer == "P.Mahomes")
+)
+
+```
+
+The output above shows that, Mahomes' average passing touchdown count over the previous 39 games (the 2021 season and all prior games in 2022) was 2.38 and that our model expects that he'll throw for about 2.11 touchdowns in the Superbowl. Note that part of this expectation is *regression toward the mean* -- Mahomes, the best quarterback in the league, is pulled down towards the average by the model.
+
+The betting market in this scenario already favored below the 2.5 touchdown line. We want to know whether the market has made this "too much" or "too little" a favorite by their implied odds.
+
+```{r}
+pois_reg_fit %>% 
+  augment(pbp_pass_td_model) %>%
+  mutate(
+    p_0_td = dpois(0, .pred),
+    p_1_td = dpois(1, .pred),
+    p_2_td = dpois(2, .pred),
+    p_under = ppois(2, .pred),
+    p_over = 1 - p_under
+  ) %>%
+  filter(season == 2022, week == 22, passer == "P.Mahomes")
+```
+
+Recall that we needed at least a 40% chance of Mahomes exceeding the line in order to expect to at least break even on betting the over.
+
+```{r}
+100/(100 + 150)
+```
+
+Our predicted probability is too low to justify that bet. Additionally, the 64.7% is also slightly shy of the 64.9% that we needed to justify betting on the under.
+
+```{r}
+185/(100 + 185)
+```
+
+:::{.callout-tip}
+The textbook suggests that, in all but a few cases, we should not bet. The sportsbooks set their lines so that we are near the break-even point, but their "vigorish" (the money they skim of the top in order to profit) generally pushes the expectations below the threshold to make a bet.
+:::
+
+:::{.callout-note}
+## Moneyline to Percentages
+If the moneyline is negative, take the absolute value of the moneyline and divide it 100 more than the absolute value of the moneyline. If the moneyline is positive, take the quotient of the moneyline to 100 more than the money line. That is,
+
+$$\frac{\left|\text{moneyline}\right|}{\left|\text{moneyline}\right| + 100}~~~~~\text{ or }~~~~~\frac{\text{moneyline}}{\text{moneyline} + 100}$$
+
+To get the percentage corresponding to an *under*, subtract the above quotient from 1.
+:::
+
+:::{.callout-important}
+## Poisson Regression Coefficients
+The exponentiated regression coefficients from a Poisson regression model are multiplicative, like those exponentiated coefficients (odds) in a logistic regression model. Take care with your interpretations.
+:::
+
+### Modeling TDs per Game for Baltimore 
+
+In 2022, the Ravens lost their starting quarterback in Week 13. We may wonder if the expected number of touchdowns per game drops as a result of injuries to players throughout the season.
+
+```{r}
+bal_td <- pbp %>%
+  filter(posteam == "BAL", season == 2022) %>%
+  group_by(game_id, week) %>%
+  summarize(
+    td_per_game = sum(touchdown, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    week = week - 1 #to shift Week 1 to intercept
+  )
+
+bal_td %>%
+  ggplot(aes(x = week, y = td_per_game)) + 
+  geom_point() + 
+  geom_smooth(method = "glm", method.args = list("family" = "poisson"))
+```
+
+Let's fit the model and analyze the coefficients.
+
+```{r}
+pois_reg_spec <- poisson_reg() %>%
+  set_engine("glm") %>%
+  set_mode("regression")
+
+pois_reg_rec <- recipe(td_per_game ~ week, data = bal_td)
+
+pois_reg_wf <- workflow() %>%
+  add_model(pois_reg_spec) %>%
+  add_recipe(pois_reg_rec)
+
+pois_reg_fit <- pois_reg_wf %>%
+  fit(bal_td)
+
+pois_reg_fit %>%
+  extract_fit_parsnip() %>%
+  tidy() %>%
+  mutate(
+    exp_lower = exp(estimate - 2*std.error),
+    exp_est = exp(estimate),
+    exp_upper = exp(estimate + 2*std.error)
+  )
+```
+
+The raw slope coefficient is the *risk ratio* or *relative risk* for each week. That coefficient being negative indicates that the expected number of touchdowns decreases as weeks go by. After exponentiating, we get an intercept of 3.502 and a slope coefficient of 0.939. The intercept is the expected number of touchdowns in Week 1 (remember we subtracted 1 from the week) and then the 0.939 is a deflation factor from week to week. For example, in week 5 we should expect $3.502\times\left(0.939^4\right) \approx 2.72$ touchdowns for the Ravens.
+
+### Exercises
+
+1. What happens in the model for touchdown passes if you don't include the total for the game? Does it change any of the probabilities enough to recommend a bet for Mahomes' superbowl passing touchdown total?
+2. Repeat the work in the chapter for interceptions thrown.
+3. Repeat the touchdown and interception analysis for Jalen Hurts. Do the results permit a bet on (or against) Hurts?
+4. Improve your model -- perhaps including weather features.
+5. Try using a quasi-Poisson model to estimate dispersion parameters.
+6. Use a negative binomial model instead of a Poisson model for the analyses completed in this chapter.
+
+## Chapter 7: Web-Scraping, Obtaining and Analyzing Draft Picks
 
 
 
