@@ -1693,7 +1693,12 @@ lin_reg_fit %>%
 
 Again, I'm not replicating the values from the text here. My model was slightly different than the one in the book, which could be contributing here.
 
+### Exercises
 
-
+1. Change the web-scraping examples to different ranges of years. Identify whether errors arise, and why.
+2. Scrap NFL scouting combine data from Pro Football Reference, updating the URL to `.../draft/YEAR-combine.htm`
+3. Plot the 40-yard dash times using the combine data, coloring each point by player position. Which positions are fastest/slowest, and what other patterns do you notice?
+4. Join the draft and combine data together -- is there an association between 40-yard dash time and draft position? Is that relationship more pronounced for some positions?
+5. Revisit the draft curve, constructing it for a rolling median instead of rolling mean.
 
 
