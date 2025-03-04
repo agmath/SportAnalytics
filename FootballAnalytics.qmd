@@ -1701,4 +1701,195 @@ Again, I'm not replicating the values from the text here. My model was slightly 
 4. Join the draft and combine data together -- is there an association between 40-yard dash time and draft position? Is that relationship more pronounced for some positions?
 5. Revisit the draft curve, constructing it for a rolling median instead of rolling mean.
 
+## Chapter 8: Principal Components Analysis and Clustering
+
+Principal Components can be used to combine signals from correlated features in order to encode the majority of the information contained across those features (without the need to select only one or deal with multicollinearity). In this chapter, we look at PCA and clustering to identify styles of play and position groupings within players participating at the NFL Combine.
+
+We'll start by scraping the combine data from the web.
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(rvest)
+library(htmlTable)
+library(multiUS)
+library(ggthemes)
+library(patchwork)
+library(tidyclust)
+
+rm(list = ls())
+```
+
+```{r}
+#| eval: false
+
+combine_df <- tibble()
+
+for(year_idx in 2000:2023){
+  url <- paste0("https://www.pro-football-reference.com/draft/", year_idx, "-combine.htm")
+  
+  web_data <- read_html(url) %>%
+    html_table()
+  
+  web_data_clean <- web_data[[1]] %>%
+    mutate(season = year_idx) %>%
+    filter(Ht != "Ht")
+  
+  combine_df <- combine_df %>%
+    bind_rows(web_data_clean)
+}
+
+write.csv(combine_df, "combine_00_23.csv", row.names = FALSE)
+```
+
+The code above is marked to not be evaluated when the notebook is rendered. This, as usual with scraping, is meant to prevent pinging sites often and becoming rate-limited or blocked. When the data is updated (perhaps after the yearly combine), then we can run the code again to update our data. Otherwise, the data won't change and we'll simply read in the scraped data below.
+
+```{r}
+combine_df <- read_csv("combine_00_23.csv")
+
+combine_df <- combine_df %>%
+  separate(Ht, into = c("ht_ft", "ht_in"), sep = "-") %>%
+  mutate(
+    ht_ft = as.numeric(ht_ft),
+    ht_in = as.numeric(ht_in),
+    ht = 12*ht_ft + ht_in
+  ) %>%
+  select(-ht_ft, -ht_in)
+
+names(combine_df) <- janitor::make_clean_names(names(combine_df))
+
+combine_df
+```
+
+Let's look at variables which are associated with one another.
+
+```{r}
+#| message: false
+#| warning: false
+
+p1 <- combine_df %>%
+  ggplot(aes(x = ht, y = wt)) +
+  geom_point() + 
+  geom_smooth(method = "lm")
+
+p2 <- combine_df %>%
+  ggplot(aes(x = wt, y = x40yd)) + 
+  geom_point() +
+  geom_smooth(method = "lm")
+
+p3 <- combine_df %>%
+  ggplot(aes(x = broad_jump, y = vertical)) + 
+  geom_point() + 
+  geom_smooth(method = "lm")
+
+p4 <- combine_df %>%
+  ggplot(aes(x = wt, y = vertical)) + 
+  geom_point() + 
+  geom_smooth(method = "lm")
+
+(p1 + p2) / (p3 + p4)
+```
+
+There are several other highly correlated pairs as well, such as 40-yard dash time and 3-cone time. Let's run PCA and check on the results.
+
+```{r}
+combine_df <- combine_df %>%
+  filter(!is.na(ht))
+
+pca_rec <- recipe(1 ~ ., data = combine_df) %>%
+  step_rm(season) %>%
+  step_rm(all_nominal_predictors()) %>%
+  step_normalize(all_numeric_predictors()) %>%
+  step_impute_knn(all_numeric_predictors(), neighbors = 10) %>%
+  step_pca(all_numeric_predictors())
+
+pca_rec %>%
+  prep() %>%
+  tidy(number = 5, type = "variance") %>%
+  filter(terms == "percent variance") %>%
+  mutate(
+    cum_variance = cumsum(value)
+  )
+
+pca_rec %>%
+  prep() %>%
+  tidy(number = 5, type = "coef") %>%
+  select(-id) %>%
+  pivot_wider(names_from = component, values_from = value)
+```
+
+Note that the first principal component alone encodes nearly all the variation across the numeric features. We can plot the first two principal components, as seen in the text.
+
+```{r}
+pca_rec %>%
+  prep() %>%
+  bake(combine_df) %>%
+  ggplot() + 
+  geom_point(aes(x = PC1, y = PC2),
+             alpha = 0.5)
+```
+
+Per usual, there are differences here. It could be due to my scaling
+
+```{r}
+pca_rec %>%
+  prep() %>%
+  bake(combine_df) %>%
+  bind_cols(combine_df) %>%
+  ggplot() + 
+  geom_point(aes(x = PC1, y = PC2, color = pos),
+             alpha = 0.5) + 
+  facet_wrap(~pos) + 
+  theme(legend.position = "none")
+```
+
+Let's now use clustering on our combine data.
+
+```{r}
+kmeans_spec <- k_means(num_clusters = 6)
+
+kmeans_fit <- kmeans_spec %>%
+  fit(~ PC1 + PC2,
+    data = pca_rec %>%
+      prep() %>%
+      bake(combine_df)
+  )
+
+kmeans_fit %>%
+  augment(pca_rec %>%
+            prep() %>%
+            bake(combine_df)) %>%
+  bind_cols(combine_df) %>%
+  ggplot() + 
+  geom_bar(aes(x = pos)) + 
+  coord_flip() +
+  facet_wrap(~.pred_cluster)
+```
+
+We can see summary statistics by cluster and position, if we like.
+
+```{r}
+kmeans_fit %>%
+  augment(pca_rec %>%
+            prep() %>%
+            bake(combine_df)) %>%
+  bind_cols(combine_df) %>%
+  group_by(.pred_cluster, pos) %>%
+  summarize(
+    num_players = n(),
+    avg_ht = mean(ht),
+    avg_wt = mean(wt),
+    .groups = "drop"
+  ) %>%
+  filter(.pred_cluster == "Cluster_1")
+```
+
+### Exercises
+
+1. What happens when you do PCA onthe original data, with all of the NAs included? How does this affect the future football analytics workflow?
+2. Perform any k-means clustering with the first three principal components, instead of only the first two. Do you notice differences? What about with the first four?
+3. Perform the k-means clustering with five and seven clusters. How does this change the results?
+4. Where else could we apply clustering as a component of an approach to football analytics?
+
+## Chapter 9: Advanced Tools and Next Steps
 
