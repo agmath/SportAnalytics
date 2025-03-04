@@ -1476,5 +1476,224 @@ The raw slope coefficient is the *risk ratio* or *relative risk* for each week. 
 
 ## Chapter 7: Web-Scraping, Obtaining and Analyzing Draft Picks
 
+```{r}
+rm(list = ls())
+
+library(tidyverse)
+library(tidymodels)
+library(rvest)
+library(janitor)
+library(zoo)
+library(htmlTable)
+```
+
+We'll try extracting data from the NFL Draft and from the NFL Combine. The code cell below is set not to run because we ran it once to scrape the data and then saved out the results to a local csv file. This prevents us from pinging the site too often and getting rate-limited or blocked. When we want updated data, we simply edit the code below, run it, save out the results, and then reset `eval` to false.
+
+```{r}
+#| warning: false
+#| message: false
+#| eval: false
+
+draft_df <- tibble()
+
+for(year_idx in 2000:2022){
+  url <- paste0("https://www.pro-football-reference.com/years/", year_idx, "/draft.htm")
+  
+  web_data <- read_html(url) %>%
+    html_nodes(xpath = '//*[@id="drafts"]') %>%
+    html_table()
+  
+  web_df <- web_data[[1]]
+  
+  web_df_clean <- web_df %>%
+    janitor::row_to_names(row_number = 1) %>%
+    janitor::clean_names(case = "none") %>%
+    mutate(season = year_idx) %>%
+    filter(Tm != "Tm")
+  
+  draft_df <- draft_df %>%
+    bind_rows(web_df_clean)
+}
+```
+
+Now we'll rename the teams that have moved cities during this time period.
+
+```{r}
+#| eval: false
+
+draft_df <- draft_df %>%
+  mutate(
+    Tm = case_when(
+      Tm == "SDG" ~ "LAC",
+      Tm == "OAK" ~ "LRV",
+      Tm == "STL" ~ "LAR",
+      TRUE ~ Tm
+    )
+  )
+
+write.csv(draft_df, "draft_00_22.csv", row.names = FALSE)
+```
+
+```{r}
+draft_df <- read_csv("draft_00_22.csv")
+
+draft_used <- draft_df %>%
+  select(season, Pick, Tm, Player, Pos, wAV, DrAV)
+
+draft_used
+```
+
+Notice that players making the *Hall of Fame* are labeled with the suffix `HOF` -- we'll remove that in case we want to join this data frame with another one using player names as a key.
+
+```{r}
+draft_used <- draft_used %>%
+  mutate(Player = str_remove(Player, " HOF$"))
+
+draft_used
+```
+
+We're going to attempt to recreate an analysis done to show that the surplus-value (on-field value adjusted for salary) is maximized my mid-to-late first-rounders and early second-round draft picks. The value decays exponentially with pick number. We'll use the *draft approximate value* (`DrAV`). We'll also filter out players drafted in 2020 and beyond because they're still playing under their rookie contracts.
+
+```{r}
+draft_used %>%
+  mutate(
+    DrAV = as.numeric(DrAV),
+    wAV = as.numeric(wAV),
+    Pick = as.integer(Pick)
+  ) %>%
+  filter(season <= 2019) %>%
+  # group_by(Pick) %>%
+  # summarize(avg_DrAV = mean(DrAV),
+  #           .groups = "drop") %>%
+  ggplot(aes(x = Pick, y = DrAV)) +
+  geom_smooth() + 
+  geom_point(alpha = 0.05) + 
+  theme_bw()
+  
+```
+
+We can see the line of decay there. The real question now is what teams are looking for when they draft. The average value for late picks is likely to be skewed higher by "hits" on those picks, but the median for those late picks is likely to be very close to 0. Those late picks certainly don't carry 0 value though because teams trade those picks (and the players drafted with them) quite often. 
+
+For now, we'll use the mean, but *quantile regression* is discussed later in the book (page 242). We'll use a rolling mean with a centered window and six picks on either side.
+
+```{r}
+draft_rolling_mean <- draft_df %>%
+  mutate(
+    DrAV = as.numeric(DrAV),
+    wAV = as.numeric(wAV),
+    Pick = as.integer(Pick)
+  ) %>%
+  filter(season <= 2019) %>%
+  group_by(Pick) %>%
+  summarize(mean_DrAV = mean(DrAV, na.rm = TRUE)) %>%
+  mutate(mean_DrAV = ifelse(is.na(mean_DrAV), 0, mean_DrAV)) %>%
+  mutate(
+    roll_DrAV = rollapply(mean_DrAV,
+                          width = 13,
+                          FUN = mean,
+                          na.rm = TRUE,
+                          fill = "extend",
+                          partial = TRUE
+                          )
+  )
+
+draft_rolling_mean %>%
+  ggplot(aes(x = Pick, y = roll_DrAV)) +
+  geom_point() + 
+  geom_smooth() + 
+  labs(
+    x = "Pick Number",
+    y = "Rolling average (\u00B1 6) DrAV"
+  ) +
+  theme_bw()
+```
+
+Let's fit a model and then analyse the results.
+
+```{r}
+lin_reg_spec <- linear_reg() %>%
+  set_engine("lm") %>%
+  set_mode("regression")
+
+lin_reg_rec <- recipe(roll_DrAV ~ Pick, data = draft_rolling_mean) %>%
+  step_mutate(roll_DrAV = log(roll_DrAV + 1))
+
+lin_reg_wf <- workflow() %>%
+  add_model(lin_reg_spec) %>%
+  add_recipe(lin_reg_rec)
+
+lin_reg_fit <- lin_reg_wf %>%
+  fit(draft_rolling_mean)
+
+lin_reg_fit %>%
+  extract_fit_parsnip() %>%
+  tidy()
+```
+
+Now we'll augment our data with the draft predictions.
+
+```{r}
+draft_rolling_mean_preds <- lin_reg_fit %>%
+  augment(draft_rolling_mean) %>%
+  mutate(.pred = ifelse(.pred < 0, 0, .pred)) %>%
+  mutate(fitted_DrAV = exp(.pred) - 1)
+
+draft_rolling_mean_preds
+```
+
+While this model fit is quite poor (it drastically underestimates the value of early picks), we can still use it to explore draft situations. We'll try evaluating the Jets/Colts 2018 trade.
+
+```{r}
+future_pick <- tibble(
+  Pick = "Future 2nd round",
+  Value = "14.8 (discounted at rate of 25%)"
+)
+
+team <- tibble(
+  ReceivingTeam = c("Jets", rep("Colts", 4))
+)
+
+tbl_1 <- draft_rolling_mean_preds %>%
+  filter(Pick %in% c(3, 6, 37, 49)) %>%
+  select(Pick, fitted_DrAV) %>%
+  rename(Value = fitted_DrAV) %>%
+  mutate(
+    Pick = as.character(Pick),
+    Value = as.character(round(Value, 1))
+  ) %>%
+  bind_rows(
+    future_pick
+  )
+
+team %>%
+  bind_cols(tbl_1)
+```
+
+The Jets made a terrible trade here. They got an expected 29.4 DrAV, but then gave away 86.5 in DrAV -- that nets the trade at -57.1 DrAV for the Jets. The actual results for the Jets were even worse, after accounting for the actual value of the players the Colts got with their picks.
+
+We may also wonder whether some teams are better at drafting than others. This is tricky to answer though because team performance in the field is associated with their drafting order. Since the best players are picked early in the draft, we don't want to just erroneously claim that the worst teams are the best drafters. 
+
+```{r}
+lin_reg_fit %>%
+  augment(draft_used %>% 
+            filter(season <= 2019) %>%
+            mutate(roll_DrAV = 1),
+          type = "response") %>%
+  group_by(Tm) %>%
+  summarize(
+    total_picks = n(),
+    DrAV_OE = mean(DrAV - .pred, na.rm = TRUE),
+    DrAV_sigma = sd(DrAV - .pred, na.rm = TRUE),
+    se = DrAV_sigma/sqrt(total_picks),
+    lower_bound = DrAV_OE - 2*se,
+    upper_bound = DrAV_OE + 2*se
+  ) %>%
+  arrange(-DrAV_OE)
+```
+
+Again, I'm not replicating the values from the text here. My model was slightly different than the one in the book, which could be contributing here.
+
+
+
 
 
